@@ -29,6 +29,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "license": "MIT OR Apache-2.0",
     "shortDescription": "A dedicated app for writing stories",
     "icon": [
       "icons/32x32.png",

@@ -4,6 +4,8 @@ description = "Organise, measure and compile the stories in a Markdown (Obsidian
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "story-time"
