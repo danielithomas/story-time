@@ -1,0 +1,20 @@
+[package]
+name = "story-time"
+description = "Organise, measure and compile the stories in a Markdown (Obsidian) vault."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "story-time"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+story-time-core.workspace = true
+unicode-width = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

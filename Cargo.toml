@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli", "apps/desktop/src-tauri"]
+# The desktop app needs the system webview's development libraries to build, so plain
+# `cargo build` / `cargo test` cover the core and CLI only. Use `--workspace` for everything.
+default-members = ["crates/core", "crates/cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.90"
+
+[workspace.dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+story-time-core = { path = "crates/core" }
+tempfile = "3"

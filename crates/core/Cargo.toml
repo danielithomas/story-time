@@ -1,0 +1,18 @@
+[package]
+name = "story-time-core"
+description = "Reads and writes a plain-Markdown story vault: projects, word counts, writing history, checks and compiling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+dirs = "7"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+yaml-rust2 = "0.13"
+
+[dev-dependencies]
+tempfile.workspace = true

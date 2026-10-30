@@ -1,0 +1,222 @@
+@import "@fontsource-variable/literata/opsz.css";
+@import "@fontsource-variable/literata/opsz-italic.css";
+
+:root {
+  --serif: "Literata Variable", "Iowan Old Style", Georgia, "Liberation Serif", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", "Noto Sans", Ubuntu, Cantarell, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "DejaVu Sans Mono", monospace;
+  --editor-size: 19px;
+
+  --bg: #f4f1ea;
+  --paper: #fcfaf6;
+  --panel: #ebe6dc;
+  --line: #ddd6c8;
+  --text: #2a2723;
+  --text-soft: #4b463f;
+  --muted: #8a8276;
+  --accent: #2c6b66;
+  --accent-text: #ffffff;
+  --accent-soft: #d8e9e5;
+  --selection: #cce2dd;
+  --danger: #a2402f;
+  --danger-soft: #f6e1dc;
+
+  --outline: #a39b8e;
+  --draft: #c4892b;
+  --revised: #3f7cac;
+  --final: #3f8f5a;
+
+  color-scheme: light;
+}
+
+/* Follows the system, unless data-theme="light" on <html> asks otherwise. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1b1a18;
+    --paper: #21201d;
+    --panel: #2a2824;
+    --line: #36332e;
+    --text: #e8e2d6;
+    --text-soft: #cfc7b9;
+    --muted: #8f877a;
+    --accent: #72b5ab;
+    --accent-text: #14211f;
+    --accent-soft: #233d39;
+    --selection: #2e4945;
+    --danger: #e07b66;
+    --danger-soft: #3d2520;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 14px/1.45 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--panel);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn.ghost {
+  border-color: transparent;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  width: 100%;
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a8276' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field > :not(span) {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* Chapter status, as a dot or a badge. */
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--outline);
+}
+
+.badge {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid var(--outline);
+  color: var(--muted);
+}
+
+[data-status="draft"] {
+  border-color: var(--draft);
+  --tone: var(--draft);
+}
+[data-status="revised"] {
+  border-color: var(--revised);
+  --tone: var(--revised);
+}
+[data-status="final"] {
+  border-color: var(--final);
+  --tone: var(--final);
+}
+.dot[data-status="draft"],
+.dot[data-status="revised"],
+.dot[data-status="final"] {
+  background: var(--tone);
+}
+.badge[data-status="draft"],
+.badge[data-status="revised"],
+.badge[data-status="final"] {
+  color: var(--tone);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

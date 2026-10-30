@@ -1,0 +1,25 @@
+[package]
+name = "story-time-desktop"
+description = "Story Time: a desktop app for writing stories, kept as Markdown in a folder you choose."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+story-time-core.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Both must match the versions Tauri uses. webkit2gtk switches on WebKitGTK's spellchecker;
+# cairo-rs's png feature lets development builds save snapshots of the window.
+cairo-rs = { version = "0.18", features = ["png"] }
+webkit2gtk = "2"
