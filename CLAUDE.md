@@ -15,6 +15,8 @@ cd apps/desktop && npm run tauri dev        # run the desktop app
 
 To see the desktop screens, use the snapshot tour (README, "Checking the desktop screens") with `XDG_CONFIG_HOME`/`XDG_DATA_HOME` pointed at a throwaway vault. Don't use desktop screenshot tools such as `spectacle`: they capture whatever window has focus, which can be a private browser window. Stop the app with `pkill -x story-time-desk`; `pkill -f` patterns that appear in your own command line kill your own shell.
 
+Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pushed (README, "Releases"). The tag must equal the version in `Cargo.toml`, `apps/desktop/package.json` and `apps/desktop/src-tauri/tauri.conf.json`. Never attach locally built binaries to a release: they embed the build machine's home-directory paths.
+
 ## Architecture
 
 - `crates/core` (`story-time-core`) holds all behaviour. `crates/cli` (`story-time`) parses arguments and prints. `apps/desktop/src-tauri` exposes core functions as Tauri commands (`src/commands.rs`, DTOs with camelCase serde); the Svelte interface in `apps/desktop/src` calls them through `src/lib/api.ts`, with shapes mirrored in `src/lib/types.ts`. Keep those three in step. Front ends never read the vault directly; new behaviour goes in core first.

@@ -1,0 +1,132 @@
+name: Release
+
+# Builds the desktop installers for Linux, Windows and macOS and attaches them to a draft
+# GitHub release, which stays private until it is published by hand.
+#
+# Runs when a version tag such as v0.2.0 is pushed. It can also be run by hand for a tag that
+# already exists (Actions → Release → Run workflow); the source is taken from the tag.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, for example v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+concurrency: release-${{ inputs.tag || github.ref_name }}
+
+jobs:
+  prepare:
+    name: Check and draft the release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tag matches the app version
+        run: |
+          version="${TAG#v}"
+          status=0
+          for found in \
+            "Cargo.toml=$(cargo metadata --no-deps --format-version 1 | jq -r '[.packages[].version] | unique | join(", ")')" \
+            "apps/desktop/package.json=$(jq -r .version apps/desktop/package.json)" \
+            "apps/desktop/src-tauri/tauri.conf.json=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"; do
+            if [ "${found#*=}" != "$version" ]; then
+              echo "::error file=${found%%=*}::version ${found#*=} doesn't match the tag $TAG"
+              status=1
+            fi
+          done
+          exit $status
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: |
+            Installers for Linux, Windows and macOS are attached below. They aren't code-signed yet, so each system asks you to confirm the first time you open Story Time.
+
+            - **Linux:** install the `.deb` (Ubuntu 22.04, Debian 12 or later) with `sudo apt install ./Story.Time_*.deb`. There is also an `.rpm`, and an `.AppImage` that runs on most distributions after `chmod +x`.
+            - **Windows:** run the `-setup.exe`, or the `.msi`. If SmartScreen says "Windows protected your PC", choose **More info**, then **Run anyway**.
+            - **macOS:** open the `.dmg` for your Mac (`aarch64` for Apple silicon, `x64` for Intel) and drag Story Time to Applications. If macOS won't open it, choose **Open Anyway** in **System Settings → Privacy & Security**. If it says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Story Time.app"` once.
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          if [ -z "$id" ]; then
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f name="Story Time $TAG" \
+              -f body="$NOTES" -F draft=true --jq .id)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  installers:
+    name: ${{ matrix.name }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu, so the packages run on as many distributions as possible.
+          - name: Linux
+            runner: ubuntu-22.04
+          - name: Windows
+            runner: windows-latest
+          - name: macOS (Apple silicon)
+            runner: macos-latest
+            target: aarch64-apple-darwin
+          - name: macOS (Intel)
+            runner: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Front-end dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}

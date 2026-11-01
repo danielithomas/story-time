@@ -166,6 +166,16 @@ mkdir -p /tmp/st/config/story-time && echo 'vault = "/tmp/st/vault"' > /tmp/st/c
 XDG_CONFIG_HOME=/tmp/st/config XDG_DATA_HOME=/tmp/st/data VITE_SNAPSHOT_DIR=/tmp/st/shots npm run tauri dev
 ```
 
+### Releases
+
+Pushing a version tag builds the installers on GitHub (`.github/workflows/release.yml`): `.deb`, `.rpm` and `.AppImage` on Ubuntu 22.04, `.msi` and `-setup.exe` on Windows, and a `.dmg` each for Apple silicon and Intel Macs. They are attached to a draft release, which stays private until you publish it.
+
+1. Set the new version in `Cargo.toml` (`[workspace.package]`), `apps/desktop/src-tauri/tauri.conf.json` and `apps/desktop/package.json` (`npm version 0.2.0 --no-git-tag-version` updates its lock file too), then run `cargo check` so `Cargo.lock` follows. The workflow stops if the tag and the versions disagree.
+2. Commit, then tag and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin main v0.2.0`.
+3. When the run finishes, check the draft release on GitHub and publish it.
+
+Versions follow [semantic versioning](https://semver.org). Before 1.0, raise the minor version (0.2.0) for new features or any change to the vault format, configuration or CLI, and the patch version (0.1.1) for fixes. To build an existing tag again, run the Release workflow from the Actions tab and give it the tag.
+
 ## Licence
 
 Licensed under either of
