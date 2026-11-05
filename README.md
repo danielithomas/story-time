@@ -23,8 +23,8 @@ Needs Rust 1.90 or later. [pandoc](https://pandoc.org) is optional; it is used o
 cd ~/stories
 story-time init                                   # config, templates, Obsidian template folder
 story-time new "Sample Story" --from-idea         # project folder; premise copied from the ideas file
-story-time add chapter "Arrival"                  # chapters/01 Arrival.md
-story-time add character "Mara Chen"              # characters/Mara Chen.md
+story-time add chapter "Arrival"                  # chapters/01-arrival.md
+story-time add character "Mara Chen"              # characters/mara-chen.md
 story-time stats                                  # every project at a glance
 ```
 
@@ -43,16 +43,16 @@ Option 4 makes every command work from any directory, which helps if the vault m
 
 | Command | What it does |
 |---|---|
-| `init [--force]` | Writes `.story-time/config.toml`, the note templates in `Templates/`, `.obsidian/templates.json` (pointing Obsidian's Templates plugin at that folder) and, in a git repository, a `.gitignore` entry for compiled output and a `.gitattributes` entry so git merges the writing log from two machines instead of reporting a conflict. Existing files are kept; `--force` replaces only the templates. |
+| `init [--force]` | Writes `.story-time/config.toml`, the note templates in `templates/`, `.obsidian/templates.json` (pointing Obsidian's Templates plugin at that folder) and, in a git repository, a `.gitignore` entry for compiled output and a `.gitattributes` entry so git merges the writing log from two machines instead of reporting a conflict. Existing files are kept; `--force` replaces only the templates. |
 | `new "Title" [--form F] [--target N] [--structure S] [--from-idea [NAME]]` | Creates `<slug>/` with the project note, the story flow and the four folders. `--structure` lays out the flow note with beats and the word count each lands at (`three-act`, `save-the-cat`, `heros-journey`, `story-circle`, `kishotenketsu`, `freeform`). `--from-idea` copies the premise from the ideas file and appends `→ [[slug]]` to that idea. Nothing in the ideas file is removed or reworded. |
-| `add chapter\|character\|location\|world "Name" [-p project]` | Creates a note from its template. Chapters are numbered after the highest existing number. |
+| `add chapter\|character\|location\|world "Name" [-p project]` | Creates a note from its template, named with the kebab-case form of the name and with the name itself as its first alias. Chapters are numbered after the highest existing number. |
 | `stats [project]` | All projects: status, form, chapters, words, progress to target. One project: chapter table, progress, deadline pacing, length category, manuscript pages and reading time, words today, story-bible size. |
 | `outline [project]` | Each chapter's status, POV, word count and synopsis, in order: a corkboard for the terminal. |
 | `today` | Words written today against the daily goal, per project, plus your streak. |
 | `history [--days N]` | Words written per day. |
 | `snapshot` | Records word counts silently, for a cron job or git hook. |
 | `idea Name: description [--non-fiction]` | Appends an idea under `### Fiction` (or `### Non-Fiction`) in the ideas file, in the list style already there. |
-| `check [project]` | Story-bible gaps: links to notes that don't exist yet, character, location and world notes whose name never appears in a chapter, and chapters missing a status or synopsis. |
+| `check [project]` | Story-bible gaps: links to notes that don't exist yet, character, location and world notes whose name never appears in a chapter, and chapters missing a status or synopsis. Also links Obsidian can't follow to a single note, and file names that aren't kebab-case or no longer match the note's name. |
 | `compile [project] [--format md\|docx\|epub\|html\|pdf] [-o path]` | Chapters in order as one manuscript, minus notes-to-self. Defaults to `.story-time/build/<slug>.<format>`. |
 
 Without a project argument, commands other than `stats` use the project folder you are in, or the only project in the vault. Otherwise give its slug, title, or an unambiguous part of either (`stats edge`).
@@ -71,13 +71,15 @@ Without a project argument, commands other than `stats` use the project folder y
 | project | `deadline` | `YYYY-MM-DD`; `stats` works out the words a day needed |
 | chapter | `status` | `outline` → `draft` → `revised` → `final` |
 | chapter | `pov`, `synopsis` | shown in `stats` and `outline` |
-| character, location, world | `aliases` | other names; `check` looks for these on the page |
+| any note | `aliases` | the first is the note's name, the rest other names it goes by; `check` looks for all of them on the page |
 
-**Chapter order** comes from the file path, comparing numbers as numbers: `2 x` before `10 y`. Subfolders such as `chapters/part-1/` work too.
+**Names.** Files and folders are named in lowercase kebab-case (`mara-chen.md`), so there are no spaces to quote and no names that differ only in case. A note's real name is its `title` (projects) or its first alias (everything else), and that is what story-time shows. Links are written `[[mara-chen|Mara Chen]]`: Obsidian follows the file name and shows the name. story-time resolves a bare link to the nearest note with that file name, in the linking note's project before anywhere else, and also accepts an alias; when a file name exists in more than one place, write the link with a path relative to the note (`[[../characters/mara-chen|Mara Chen]]`) so Obsidian opens the right one.
+
+**Chapter order** comes from the file path, comparing numbers as numbers: `2-x` before `10-y`. Subfolders such as `chapters/part-1/` work too.
 
 **Word counts** cover the prose a reader would read. They leave out properties, headings (chapter and scene titles), `%% Obsidian comments %%`, `<!-- HTML comments -->`, callouts such as `> [!todo]`, code blocks and embeds. Links count as the text they display. Hyphenated words count once; words joined by an em dash count separately.
 
-**Templates** in the vault's `Templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the Project or Story Flow template by hand.
+**Templates** in the vault's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
 
 **The vault format.** `docs/vault-format.md` specifies the next version of this layout, which isn't implemented yet. story-time refuses to open a vault whose `.story-time/config.toml` has a `format` newer than it understands, rather than misread or change it.
 

@@ -29,7 +29,7 @@ reading_wpm = 250
 ideas_file = "Scratchpad/Ideas.md"
 
 # Note templates, shared with Obsidian's core Templates plugin.
-templates_dir = "Templates"
+templates_dir = "templates"
 
 # Name printed on compiled manuscripts.
 # author = "Your Name"
@@ -60,7 +60,7 @@ impl Default for Config {
             words_per_page: 250,
             reading_wpm: 250,
             ideas_file: "Scratchpad/Ideas.md".to_string(),
-            templates_dir: "Templates".to_string(),
+            templates_dir: "templates".to_string(),
             author: None,
             spelling: None,
         }

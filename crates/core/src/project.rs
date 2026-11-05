@@ -7,7 +7,7 @@ use chrono::NaiveDate;
 
 use crate::ids;
 use crate::note::Note;
-use crate::text::{leading_number, natural_cmp, strip_leading_number};
+use crate::text::{leading_number, name_from_file, natural_cmp, strip_leading_number};
 use crate::vault::markdown_files;
 use crate::words;
 
@@ -275,13 +275,13 @@ impl Chapter {
         leading_number(&self.note.name)
     }
 
-    /// The `title` property, else the first heading, else the file name without its number.
+    /// The note's name ([`Note::title`]), made from the file name without its number if it has
+    /// none of its own.
     pub fn title(&self) -> String {
         self.note
-            .frontmatter
-            .str("title")
+            .given_name()
             .or_else(|| self.note.heading())
-            .unwrap_or_else(|| strip_leading_number(&self.note.name).to_string())
+            .unwrap_or_else(|| name_from_file(strip_leading_number(&self.note.name)))
     }
 
     pub fn status(&self) -> Option<String> {

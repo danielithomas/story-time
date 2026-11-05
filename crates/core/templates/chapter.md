@@ -1,6 +1,8 @@
 ---
 type: chapter
 project: "[[{{project_slug}}]]"
+aliases:
+  - "{{title}}"
 status: outline
 pov:
 synopsis:

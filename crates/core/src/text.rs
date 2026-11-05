@@ -4,13 +4,15 @@ use std::cmp::Ordering;
 use std::iter::Peekable;
 use std::str::Chars;
 
-/// Turns a title into a folder name: "Sample Story" becomes "sample-story".
-pub fn slugify(title: &str) -> String {
+/// Turns a name into a file or folder name: lower-case ASCII letters and digits with a hyphen
+/// between words. Accents become the plain letter and other punctuation is dropped, so
+/// "Sample Story" becomes "sample-story" and "K'thar" becomes "kthar".
+pub fn slugify(name: &str) -> String {
     let mut slug = String::new();
-    for c in title.chars() {
-        if c.is_alphanumeric() {
-            slug.extend(c.to_lowercase());
-        } else if c == '\'' || c == '’' {
+    for c in deunicode::deunicode(name).chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if matches!(c, '\'' | '`' | '"') {
             continue;
         } else if !slug.is_empty() && !slug.ends_with('-') {
             slug.push('-');
@@ -19,20 +21,43 @@ pub fn slugify(title: &str) -> String {
     slug.trim_end_matches('-').to_string()
 }
 
-/// Removes characters that Obsidian or common filesystems reject in note names.
-pub fn note_file_name(name: &str) -> String {
-    let kept: String = name
-        .chars()
-        .filter(|c| {
-            !c.is_control()
-                && !matches!(
-                    c,
-                    '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '#' | '^' | '[' | ']'
-                )
-        })
-        .collect();
-    let joined = kept.split_whitespace().collect::<Vec<_>>().join(" ");
-    joined.trim_start_matches('.').trim().to_string()
+/// Whether `name` is already a slug: what [`slugify`] would make of it.
+pub fn is_slug(name: &str) -> bool {
+    !name.is_empty() && slugify(name) == name
+}
+
+/// The first of `slug`, `slug-2`, `slug-3` and so on that `taken` says is free.
+pub fn unique_slug(slug: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(slug) {
+        return slug.to_string();
+    }
+    (2..)
+        .map(|n| format!("{slug}-{n}"))
+        .find(|candidate| !taken(candidate))
+        .expect("an unbounded range always finds a free slug")
+}
+
+/// Whether `stem` is `slug`, or `slug` with the number [`unique_slug`] adds.
+pub fn slug_matches(stem: &str, slug: &str) -> bool {
+    stem == slug
+        || stem
+            .strip_prefix(slug)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// A readable name for a note that has none of its own, from its file name: a slug such as
+/// "the-long-night" reads as "The long night"; any other file name is used as it is.
+pub fn name_from_file(stem: &str) -> String {
+    if !is_slug(stem) {
+        return stem.to_string();
+    }
+    let words = stem.replace('-', " ");
+    let mut chars = words.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => words,
+    }
 }
 
 /// Formats a number with thousands separators: 90000 becomes "90,000".
@@ -136,9 +161,34 @@ mod tests {
     }
 
     #[test]
-    fn note_names() {
-        assert_eq!(note_file_name("Captain: Reyes / #1"), "Captain Reyes 1");
-        assert_eq!(note_file_name("  .hidden  name "), "hidden name");
+    fn more_slugs() {
+        assert_eq!(slugify("K'thar"), "kthar");
+        assert_eq!(slugify("Ōkami"), "okami");
+        assert_eq!(slugify("Café Noël, 1984"), "cafe-noel-1984");
+        assert_eq!(slugify("Captain: Reyes / #1"), "captain-reyes-1");
+        assert!(is_slug("the-long-night"));
+        assert!(!is_slug("The Long Night"));
+        assert!(!is_slug("01 Arrival"));
+        assert!(!is_slug(""));
+    }
+
+    #[test]
+    fn numbered_slugs() {
+        let taken = ["maras", "maras-2"];
+        assert_eq!(unique_slug("maras", |s| taken.contains(&s)), "maras-3");
+        assert_eq!(unique_slug("ada", |s| taken.contains(&s)), "ada");
+        assert!(slug_matches("maras", "maras"));
+        assert!(slug_matches("maras-2", "maras"));
+        assert!(!slug_matches("maras-two", "maras"));
+        assert!(!slug_matches("maras-", "maras"));
+        assert!(!slug_matches("mara", "maras"));
+    }
+
+    #[test]
+    fn names_from_file_names() {
+        assert_eq!(name_from_file("the-long-night"), "The long night");
+        assert_eq!(name_from_file("The Long Night"), "The Long Night");
+        assert_eq!(name_from_file("1984"), "1984");
     }
 
     #[test]

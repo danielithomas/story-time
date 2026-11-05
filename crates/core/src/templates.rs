@@ -1,4 +1,4 @@
-//! Note templates. The vault's own copies (in `Templates/` by default) take precedence over the
+//! Note templates. The vault's own copies (in `templates/` by default) take precedence over the
 //! built-in versions, so a template edited in Obsidian changes what story-time creates too.
 //!
 //! Obsidian's Templates plugin fills `{{title}}`, `{{date}}` and `{{time}}`. story-time fills those
@@ -23,28 +23,28 @@ pub struct Template {
 }
 
 pub const PROJECT: Template = Template {
-    file_name: "Project.md",
-    default: include_str!("../templates/Project.md"),
+    file_name: "project.md",
+    default: include_str!("../templates/project.md"),
 };
 pub const FLOW: Template = Template {
-    file_name: "Story Flow.md",
-    default: include_str!("../templates/Story Flow.md"),
+    file_name: "story-flow.md",
+    default: include_str!("../templates/story-flow.md"),
 };
 pub const CHAPTER: Template = Template {
-    file_name: "Chapter.md",
-    default: include_str!("../templates/Chapter.md"),
+    file_name: "chapter.md",
+    default: include_str!("../templates/chapter.md"),
 };
 pub const CHARACTER: Template = Template {
-    file_name: "Character.md",
-    default: include_str!("../templates/Character.md"),
+    file_name: "character.md",
+    default: include_str!("../templates/character.md"),
 };
 pub const LOCATION: Template = Template {
-    file_name: "Location.md",
-    default: include_str!("../templates/Location.md"),
+    file_name: "location.md",
+    default: include_str!("../templates/location.md"),
 };
 pub const WORLD: Template = Template {
-    file_name: "World.md",
-    default: include_str!("../templates/World.md"),
+    file_name: "world.md",
+    default: include_str!("../templates/world.md"),
 };
 
 pub const ALL: [&Template; 6] = [&PROJECT, &FLOW, &CHAPTER, &CHARACTER, &LOCATION, &WORLD];

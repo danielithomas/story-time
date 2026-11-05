@@ -2,7 +2,8 @@
 type: world
 project: "[[{{project_slug}}]]"
 category:
-aliases: []
+aliases:
+  - "{{title}}"
 tags:
   - world
 ---

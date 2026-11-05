@@ -690,11 +690,23 @@ pub struct Unreadable {
     error: String,
 }
 
+/// A file to rename: its path within the vault, and the name it should have.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rename {
+    path: String,
+    to: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckReport {
     undocumented: Vec<Mention>,
+    ambiguous_links: Vec<Mention>,
+    alias_links: Vec<Mention>,
     not_on_page: Vec<BibleNote>,
+    misnamed: Vec<Rename>,
+    drifted: Vec<Rename>,
     without_status: Vec<String>,
     without_synopsis: Vec<String>,
     empty_chapters: Vec<String>,
@@ -705,15 +717,30 @@ pub struct CheckReport {
 pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResult<CheckReport> {
     let (vault, project) = state.project(&slug)?;
     let report = check::check(&vault, &project).or_message()?;
-    Ok(CheckReport {
-        undocumented: report
-            .undocumented
+    let mentions = |links: check::LinkSources| {
+        links
             .into_iter()
             .map(|(name, sources)| Mention {
                 name,
                 sources: sources.into_iter().collect(),
             })
-            .collect(),
+            .collect()
+    };
+    let renames = |renames: Vec<(PathBuf, String)>| {
+        renames
+            .into_iter()
+            .map(|(path, to)| Rename {
+                path: vault.relative(&path).display().to_string(),
+                to,
+            })
+            .collect()
+    };
+    Ok(CheckReport {
+        undocumented: mentions(report.undocumented),
+        ambiguous_links: mentions(report.ambiguous_links),
+        alias_links: mentions(report.alias_links),
+        misnamed: renames(report.misnamed),
+        drifted: renames(report.drifted),
         not_on_page: report
             .not_on_page
             .into_iter()

@@ -428,10 +428,26 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         println!("  Nothing to report.");
         return Ok(());
     }
-    if !report.undocumented.is_empty() {
-        println!("  Linked, but no note by that name yet:");
-        let mut table = Table::new(&[("Name", Align::Left), ("Linked from", Align::Left)]);
-        for (target, sources) in &report.undocumented {
+    for (heading, links) in [
+        (
+            "Linked, but no note by that name yet:",
+            &report.undocumented,
+        ),
+        (
+            "Links that could mean more than one note (Obsidian may open the wrong one):",
+            &report.ambiguous_links,
+        ),
+        (
+            "Links by a note's name rather than its file name (Obsidian can't follow them):",
+            &report.alias_links,
+        ),
+    ] {
+        if links.is_empty() {
+            continue;
+        }
+        println!("  {heading}");
+        let mut table = Table::new(&[("Link", Align::Left), ("Linked from", Align::Left)]);
+        for (target, sources) in links {
             table.row(vec![
                 target.clone(),
                 sources.iter().cloned().collect::<Vec<_>>().join(", "),
@@ -447,6 +463,27 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         let mut table = Table::new(&[("Kind", Align::Left), ("Note", Align::Left)]);
         for (kind, name) in &report.not_on_page {
             table.row(vec![kind.key().to_string(), name.clone()]);
+        }
+        table.print(4);
+        println!();
+    }
+    for (heading, renames) in [
+        ("Names that aren't kebab-case:", &report.misnamed),
+        (
+            "File names that no longer match the note's name:",
+            &report.drifted,
+        ),
+    ] {
+        if renames.is_empty() {
+            continue;
+        }
+        println!("  {heading}");
+        let mut table = Table::new(&[("File", Align::Left), ("Rename to", Align::Left)]);
+        for (path, name) in renames {
+            table.row(vec![
+                vault.relative(path).display().to_string(),
+                name.clone(),
+            ]);
         }
         table.print(4);
         println!();

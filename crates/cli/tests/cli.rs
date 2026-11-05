@@ -43,7 +43,7 @@ fn a_project_from_idea_to_manuscript() {
     let root = dir.path();
 
     let init = ok(root, &["init"]);
-    assert!(init.contains("created  Templates/Chapter.md"), "{init}");
+    assert!(init.contains("created  templates/chapter.md"), "{init}");
     assert!(root.join(".obsidian/templates.json").is_file());
 
     let new = ok(
@@ -72,7 +72,7 @@ fn a_project_from_idea_to_manuscript() {
 
     ok(root, &["add", "chapter", "Arrival"]);
     ok(root, &["add", "character", "Mara Chen", "-p", "sample"]);
-    let chapter = root.join("sample-story/chapters/01 Arrival.md");
+    let chapter = root.join("sample-story/chapters/01-arrival.md");
     let text = fs::read_to_string(&chapter)
         .unwrap()
         .replace("synopsis:", "synopsis: Mara arrives.")
@@ -80,7 +80,7 @@ fn a_project_from_idea_to_manuscript() {
     fs::write(
         &chapter,
         format!(
-            "{text}\n[[Mara Chen]] opened the door to the hall. %% fix %%\nNobody was there.\n"
+            "{text}\n[[mara-chen|Mara Chen]] opened the door to the hall. %% fix %%\nNobody was there.\n"
         ),
     )
     .unwrap();
@@ -100,6 +100,21 @@ fn a_project_from_idea_to_manuscript() {
 
     let check = ok(root, &["check"]);
     assert!(check.contains("Nothing to report."), "{check}");
+    fs::write(
+        root.join("sample-story/characters/Old Tom.md"),
+        "Linked as [[Mara Chen]].\n",
+    )
+    .unwrap();
+    let check = ok(root, &["check"]);
+    assert!(
+        check.contains("Obsidian can't follow them") && check.contains("Mara Chen"),
+        "{check}"
+    );
+    assert!(
+        check.contains("characters/Old Tom.md") && check.contains("old-tom.md"),
+        "{check}"
+    );
+    fs::remove_file(root.join("sample-story/characters/Old Tom.md")).unwrap();
 
     ok(root, &["compile"]);
     let manuscript = fs::read_to_string(root.join(".story-time/build/sample-story.md")).unwrap();
@@ -168,5 +183,5 @@ fn refuses_a_vault_in_a_newer_format() {
         assert!(stderr.contains("format 99"), "{stderr}");
         assert!(stderr.contains("Update story-time"), "{stderr}");
     }
-    assert!(!root.join("Templates").exists(), "nothing was written");
+    assert!(!root.join("templates").exists(), "nothing was written");
 }

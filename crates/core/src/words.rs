@@ -12,7 +12,7 @@ use regex::{Captures, Regex};
 
 static EMBED: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)").unwrap());
-static WIKILINK: LazyLock<Regex> =
+pub(crate) static WIKILINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[\[([^\]|]*)(?:\|([^\]]*))?\]\]").unwrap());
 static MARKDOWN_LINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
@@ -63,23 +63,13 @@ pub fn plain_text(line: &str) -> String {
     MARKDOWN_LINK.replace_all(&line, "$1").into_owned()
 }
 
-/// The notes and files a body links to or embeds, by name: `[[world/Harbour#Origin|the harbour]]`
-/// gives "Harbour". Links inside comments are not real links and are ignored.
-pub fn link_targets(body: &str) -> Vec<String> {
-    WIKILINK
-        .captures_iter(&strip_comments(body))
-        .map(|c| link_note(&c[1]).to_string())
-        .filter(|target| !target.is_empty())
-        .collect()
-}
-
 fn link_note(target: &str) -> &str {
     let note = target.split(['#', '^']).next().unwrap_or_default();
     let note = note.rsplit('/').next().unwrap_or_default().trim();
     note.strip_suffix(".md").unwrap_or(note)
 }
 
-fn strip_comments(text: &str) -> String {
+pub(crate) fn strip_comments(text: &str) -> String {
     strip_between(&strip_between(text, "%%", "%%"), "<!--", "-->")
 }
 
@@ -156,11 +146,5 @@ mod tests {
         let body =
             "# One\n\n*She* ran to [[Old Port|the port]].\n%% fix later %%\n> [!note]\n> cut?\n";
         assert_eq!(prose(body), "# One\n\n*She* ran to the port.\n\n");
-    }
-
-    #[test]
-    fn finds_link_targets() {
-        let body = "[[Mara Chen|Mara]] met [[world/Harbour#Origin]] and ![[map.png]] and [[#Local heading]]. %% [[Planned]] %%";
-        assert_eq!(link_targets(body), ["Mara Chen", "Harbour", "map.png"]);
     }
 }

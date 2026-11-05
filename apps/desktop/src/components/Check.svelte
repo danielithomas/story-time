@@ -32,7 +32,11 @@
   const clean = $derived(
     !!report &&
       !report.undocumented.length &&
+      !report.ambiguousLinks.length &&
+      !report.aliasLinks.length &&
       !report.notOnPage.length &&
+      !report.misnamed.length &&
+      !report.drifted.length &&
       !report.withoutStatus.length &&
       !report.withoutSynopsis.length &&
       !report.emptyChapters.length &&
@@ -44,7 +48,7 @@
   {#each names as name, i (name)}
     {@const note = noteNamed(name)}
     {#if note}
-      <button class="link" onclick={() => openNote(note.path)}>{name}</button>{:else}{name}{/if}{#if i < names.length - 1},&nbsp;{/if}
+      <button class="link" onclick={() => openNote(note.path)}>{note.title}</button>{:else}{name}{/if}{#if i < names.length - 1},&nbsp;{/if}
   {/each}
 {/snippet}
 
@@ -80,6 +84,34 @@
       </section>
     {/if}
 
+    {#each [
+      {
+        title: "Links that could mean more than one note",
+        about: "Several notes share the file name, so Obsidian may open the wrong one.",
+        items: report.ambiguousLinks,
+      },
+      {
+        title: "Links Obsidian can't follow",
+        about: "They name a note by its name rather than its file name. Story Time follows them; Obsidian doesn't.",
+        items: report.aliasLinks,
+      },
+    ] as group (group.title)}
+      {#if group.items.length}
+        <section>
+          <h2>{group.title}</h2>
+          <p class="muted">{group.about}</p>
+          <ul>
+            {#each group.items as item (item.name)}
+              <li>
+                <code>[[{item.name}]]</code>
+                <span class="muted">in {@render links(item.sources)}</span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    {/each}
+
     {#if report.notOnPage.length}
       <section>
         <h2>Documented, but not on the page yet</h2>
@@ -101,6 +133,22 @@
         <section>
           <h2>{group.title}</h2>
           <p>{@render links(group.names)}</p>
+        </section>
+      {/if}
+    {/each}
+
+    {#each [
+      { title: "Names that aren't kebab-case", items: report.misnamed },
+      { title: "File names that no longer match the note's name", items: report.drifted },
+    ] as group (group.title)}
+      {#if group.items.length}
+        <section>
+          <h2>{group.title}</h2>
+          <ul>
+            {#each group.items as item (item.path)}
+              <li><strong>{item.path}</strong> <span class="muted">rename to {item.to}</span></li>
+            {/each}
+          </ul>
         </section>
       {/if}
     {/each}

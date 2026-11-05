@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use chrono::NaiveDate;
 use yaml_rust2::{Yaml, YamlLoader};
 
+use crate::text::name_from_file;
 use crate::words;
 
 /// Splits a note into its frontmatter (without the `---` fences) and its body.
@@ -333,12 +334,20 @@ impl Note {
             .filter(|heading| !heading.is_empty())
     }
 
-    /// The `title` property, else the first heading, else the file name.
+    /// The note's name as a reader sees it: the `title` property (projects and books), else the
+    /// first alias, else the first heading, else one made from the file name.
     pub fn title(&self) -> String {
+        self.given_name()
+            .or_else(|| self.heading())
+            .unwrap_or_else(|| name_from_file(&self.name))
+    }
+
+    /// The name set in the note's properties: its `title`, else its first alias. The file name
+    /// is made from this, so `check` compares the two.
+    pub fn given_name(&self) -> Option<String> {
         self.frontmatter
             .str("title")
-            .or_else(|| self.heading())
-            .unwrap_or_else(|| self.name.clone())
+            .or_else(|| self.aliases().into_iter().next())
     }
 
     pub fn aliases(&self) -> Vec<String> {
@@ -387,7 +396,10 @@ mod tests {
         assert_eq!(fm.list("solo"), ["Reyes"]);
         assert_eq!(fm.date("created"), NaiveDate::from_ymd_opt(2026, 10, 30));
         assert_eq!(note.name, "Mara Chen");
-        assert_eq!(note.title(), "Mara Chen");
+        assert_eq!(note.title(), "Mara", "the first alias is the note's name");
+        let untitled = Note::parse(Path::new("notes/the-long-night.md"), "Text\n");
+        assert_eq!(untitled.title(), "The long night");
+        assert_eq!(untitled.given_name(), None);
     }
 
     #[test]

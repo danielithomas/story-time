@@ -1,7 +1,8 @@
 ---
 type: location
 project: "[[{{project_slug}}]]"
-aliases: []
+aliases:
+  - "{{title}}"
 tags:
   - location
 ---

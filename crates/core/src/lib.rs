@@ -13,6 +13,7 @@ pub mod config;
 pub mod history;
 pub mod ideas;
 pub mod ids;
+pub mod links;
 pub mod note;
 pub mod project;
 pub mod scaffold;

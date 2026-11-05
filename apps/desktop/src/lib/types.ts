@@ -109,7 +109,11 @@ export interface ProjectProgress {
 
 export interface CheckReport {
   undocumented: { name: string; sources: string[] }[];
+  ambiguousLinks: { name: string; sources: string[] }[];
+  aliasLinks: { name: string; sources: string[] }[];
   notOnPage: { kind: string; name: string }[];
+  misnamed: { path: string; to: string }[];
+  drifted: { path: string; to: string }[];
   withoutStatus: string[];
   withoutSynopsis: string[];
   emptyChapters: string[];

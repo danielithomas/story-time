@@ -12,12 +12,12 @@ use crate::config::{CONFIG_FILE, Config, DEFAULT_CONFIG, META_DIR};
 use crate::history::History;
 use crate::ideas;
 use crate::ids;
-use crate::note::{PropertyValue, set_properties};
+use crate::note::{Note, PropertyValue, set_properties};
 use crate::project::{Form, NoteKind, Project};
 use crate::structures::{self, Structure};
 use crate::templates::{self, render};
-use crate::text::{note_file_name, slugify};
-use crate::vault::Vault;
+use crate::text::{slugify, unique_slug};
+use crate::vault::{Vault, markdown_files};
 
 /// The line `init` adds to the vault's `.gitignore`: compiled manuscripts are rebuilt on demand.
 pub const BUILD_IGNORE: &str = ".story-time/build/";
@@ -225,7 +225,10 @@ pub struct NewNote {
     pub same_name: Option<PathBuf>,
 }
 
-/// Adds a note from its template. Chapters are numbered after the highest existing number.
+/// Adds a note from its template. The file is named with the slug of `name`, which becomes the
+/// note's first alias, and chapters are numbered after the highest existing number. Adding a
+/// name the project already has for this kind of note fails; a different name whose slug is
+/// already taken in the project gets a numbered slug (`maras-2`).
 pub fn add_note(
     vault: &Vault,
     project: &Project,
@@ -233,11 +236,26 @@ pub fn add_note(
     name: &str,
     today: NaiveDate,
 ) -> Result<NewNote> {
-    let title = note_file_name(name);
-    if title.is_empty() {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let slug = slugify(&name);
+    if slug.is_empty() {
         bail!("the name needs at least one letter or number");
     }
-    let file_name = match kind {
+    let existing = match kind {
+        NoteKind::Chapter => project.chapters()?.into_iter().map(|c| c.note).collect(),
+        _ => project.notes(kind)?,
+    };
+    if existing
+        .iter()
+        .any(|note| note.title().eq_ignore_ascii_case(&name))
+    {
+        bail!(
+            "{} already has a {} called {name}",
+            project.title(),
+            kind.key()
+        );
+    }
+    let base = match kind {
         NoteKind::Chapter => {
             let next = project
                 .chapters()?
@@ -246,28 +264,40 @@ pub fn add_note(
                 .max()
                 .unwrap_or(0)
                 + 1;
-            format!("{next:02} {title}")
+            format!("{next:02}-{slug}")
         }
-        _ => title.clone(),
+        _ => slug,
     };
+    let taken: HashSet<String> = markdown_files(&project.dir)?
+        .iter()
+        .filter_map(|path| path.file_stem())
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .collect();
+    let file_name = unique_slug(&base, |candidate| taken.contains(candidate));
     let path = project.folder(kind).join(format!("{file_name}.md"));
-    if path.exists() {
-        bail!("{} already exists", vault.relative(&path).display());
-    }
     let project_title = project.title();
     let date = today.format("%Y-%m-%d").to_string();
     let vars = [
-        ("title", title.as_str()),
+        ("title", name.as_str()),
         ("project", project_title.as_str()),
         ("project_slug", project.slug.as_str()),
         ("date", date.as_str()),
     ];
-    write_new(
-        &path,
-        &render(&templates::for_kind(kind).load(vault)?, &vars),
-    )?;
+    let note = render(&templates::for_kind(kind).load(vault)?, &vars);
+    write_new(&path, &with_first_alias(&path, &note, &name))?;
     let same_name = vault.note_named(&file_name, &path)?;
     Ok(NewNote { path, same_name })
+}
+
+/// A note's text with `name` as its first alias, keeping any other aliases the template gave it.
+fn with_first_alias(path: &Path, note: &str, name: &str) -> String {
+    let aliases = Note::parse(path, note).aliases();
+    if aliases.first().map(String::as_str) == Some(name) {
+        return note.to_string();
+    }
+    let mut list = vec![name.to_string()];
+    list.extend(aliases.into_iter().filter(|alias| alias != name));
+    set_properties(note, &[("aliases", PropertyValue::List(list))])
 }
 
 #[cfg(test)]
@@ -296,7 +326,7 @@ mod tests {
             first.iter().all(|step| matches!(step, Step::Created(_))),
             "{first:?}"
         );
-        assert!(dir.path().join("Templates/Character.md").is_file());
+        assert!(dir.path().join("templates/character.md").is_file());
         assert_eq!(
             fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
             ".story-time/build/\n"
@@ -322,7 +352,7 @@ mod tests {
         )
         .unwrap();
         assert!(init_vault(dir.path(), false).is_err());
-        assert!(!dir.path().join("Templates").exists());
+        assert!(!dir.path().join("templates").exists());
         assert!(Vault::open(dir.path()).is_err());
     }
 
@@ -360,10 +390,14 @@ mod tests {
             today(),
         )
         .unwrap();
-        assert!(first.path.ends_with("chapters/01 Arrival.md"));
-        assert!(second.path.ends_with("chapters/02 Leaving Home.md"));
+        assert!(first.path.ends_with("chapters/01-arrival.md"));
+        assert!(second.path.ends_with("chapters/02-leaving-home.md"));
         let chapters = project.chapters().unwrap();
-        assert_eq!(chapters[1].title(), "Leaving Home");
+        assert_eq!(
+            chapters[1].title(),
+            "Leaving: Home?",
+            "the name keeps its punctuation"
+        );
         assert_eq!(chapters[1].status().as_deref(), Some("outline"));
         assert_eq!(
             chapters[1].words, 0,
@@ -390,25 +424,26 @@ mod tests {
             today(),
         )
         .unwrap();
-        fs::create_dir_all(dir.path().join("Templates")).unwrap();
+        fs::create_dir_all(dir.path().join("templates")).unwrap();
         fs::write(
-            dir.path().join("Templates/Location.md"),
+            dir.path().join("templates/location.md"),
             "---\ntype: location\n---\n# {{title}} in {{project}}\n",
         )
         .unwrap();
         let place = add_note(&vault, &project, NoteKind::Location, "The Lab", today()).unwrap();
         assert_eq!(
             fs::read_to_string(place.path).unwrap(),
-            "---\ntype: location\n---\n# The Lab in Other Story\n"
+            "---\ntype: location\naliases:\n  - The Lab\n---\n# The Lab in Other Story\n",
+            "the name is added as the first alias"
         );
     }
 
     #[test]
     fn projects_get_ids_even_from_templates_without_one() {
         let (dir, vault) = vault();
-        fs::create_dir_all(dir.path().join("Templates")).unwrap();
+        fs::create_dir_all(dir.path().join("templates")).unwrap();
         fs::write(
-            dir.path().join("Templates/Project.md"),
+            dir.path().join("templates/project.md"),
             "---\ntype: project\ntitle: \"{{title}}\"\n---\n# {{title}}\n",
         )
         .unwrap();
