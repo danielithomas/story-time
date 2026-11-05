@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-story-time is a Rust toolkit for a writer's Markdown (Obsidian) vault, with two front ends: the `story-time` CLI and the Story Time desktop app (Tauri, in `apps/desktop`). README.md documents commands and conventions; docs/writing-practice.md explains the reasoning behind the features and lists next steps.
+story-time is a Rust toolkit for a writer's Markdown (Obsidian) vault, with two front ends: the `story-time` CLI and the Story Time desktop app (Tauri, in `apps/desktop`). README.md documents commands and conventions; docs/writing-practice.md explains the reasoning behind the features and lists next steps. docs/vault-format.md is the approved vault format 1 (not yet implemented): change code to match it, and change it only with the owner's approval.
 
 ## Commands
 
