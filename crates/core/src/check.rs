@@ -1,5 +1,6 @@
-//! World-bible checks: gaps between what a project's chapters mention and what its notes document,
-//! links Obsidian can't follow, and file names that break the naming rules.
+//! World-bible checks: gaps between what a project's scenes mention and what its notes document,
+//! contents that don't match the scenes, links Obsidian can't follow, and file names that break
+//! the naming rules.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -9,13 +10,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::links::{LinkIndex, Resolution, links};
-use crate::note::{Note, PropertyValue};
-use crate::project::{NoteKind, Project};
-use crate::text::{contains_word, is_slug, slug_matches, slugify, strip_leading_number};
+use crate::note::{Note, PropertyValue, section};
+use crate::project::{BOOKS_HEADING, NoteKind, Project};
+use crate::text::{contains_word, is_slug, slug_matches, slugify};
 use crate::vault::Vault;
 use crate::words::prose;
 
-/// The world bible: every kind of note except chapters.
+/// The world bible: every kind of note except scenes.
 pub const BIBLE: [NoteKind; 3] = [NoteKind::Character, NoteKind::Location, NoteKind::World];
 
 /// Link targets, and the notes (by file name) that link to them.
@@ -31,8 +32,13 @@ pub struct Report {
     /// Links that name a note by an alias rather than its file name. story-time follows them;
     /// Obsidian doesn't.
     pub alias_links: LinkSources,
-    /// Bible notes whose name, title and aliases appear in no chapter. Only checked once the
-    /// chapters have words in them.
+    /// Entries in a project's `## Books` or a book's `## Contents` that aren't one of its books or
+    /// scenes.
+    pub broken_entries: LinkSources,
+    /// Scenes listed more than once in their book's contents.
+    pub repeated: Vec<String>,
+    /// Bible notes whose name, title and aliases appear in no scene. Only checked once the scenes
+    /// have words in them.
     pub not_on_page: Vec<(NoteKind, String)>,
     /// Files and folders whose names aren't kebab-case, with the name each should have.
     pub misnamed: Vec<(PathBuf, String)>,
@@ -41,7 +47,7 @@ pub struct Report {
     pub drifted: Vec<(PathBuf, String)>,
     pub without_status: Vec<String>,
     pub without_synopsis: Vec<String>,
-    pub empty_chapters: Vec<String>,
+    pub empty_scenes: Vec<String>,
     pub unreadable_frontmatter: Vec<(PathBuf, String)>,
 }
 
@@ -50,12 +56,14 @@ impl Report {
         self.undocumented.is_empty()
             && self.ambiguous_links.is_empty()
             && self.alias_links.is_empty()
+            && self.broken_entries.is_empty()
+            && self.repeated.is_empty()
             && self.not_on_page.is_empty()
             && self.misnamed.is_empty()
             && self.drifted.is_empty()
             && self.without_status.is_empty()
             && self.without_synopsis.is_empty()
-            && self.empty_chapters.is_empty()
+            && self.empty_scenes.is_empty()
             && self.unreadable_frontmatter.is_empty()
     }
 }
@@ -63,25 +71,50 @@ impl Report {
 pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
     let index = LinkIndex::build(vault)?;
     let books = project.books()?;
-    let mut chapters = Vec::new();
+    let mut report = Report::default();
+    let mut broken = HashSet::new();
+    let listed = section(&project.note.body, BOOKS_HEADING).unwrap_or_default();
+    for link in links(&listed.join("\n")) {
+        let stem = link.target.rsplit('/').next().unwrap_or_default();
+        let stem = stem.strip_suffix(".md").unwrap_or(stem).to_lowercase();
+        if !books.iter().any(|book| book.slug == stem) {
+            broken.insert((project.note.path.clone(), link.target));
+        }
+    }
+    let mut scenes = Vec::new();
     let mut planning = Vec::new();
     for book in &books {
-        chapters.extend(book.chapters()?);
+        let contents = book.contents()?;
+        for target in &contents.missing {
+            broken.insert((book.note.path.clone(), target.clone()));
+        }
+        report.repeated.extend(contents.repeated.iter().cloned());
+        scenes.extend(contents.scenes().cloned());
         planning.push(book.note.clone());
         let flow = book.flow_path();
         if flow.is_file() {
             planning.push(Note::load(&flow)?);
         }
     }
+    for (path, target) in &broken {
+        let name = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        report
+            .broken_entries
+            .entry(target.clone())
+            .or_default()
+            .insert(name);
+    }
     let mut bible = Vec::new();
     for kind in BIBLE {
         bible.extend(project.notes(kind)?.into_iter().map(|note| (kind, note)));
     }
 
-    let mut report = Report::default();
-    let notes = chapters
+    let notes = scenes
         .iter()
-        .map(|c| &c.note)
+        .map(|s| &s.note)
         .chain([&project.note])
         .chain(planning.iter())
         .chain(bible.iter().map(|(_, note)| note));
@@ -93,6 +126,11 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
         }
         for link in note_links(note) {
             let list = match index.resolve(&note.path, &link.target) {
+                Resolution::Missing
+                    if broken.contains(&(note.path.clone(), link.target.clone())) =>
+                {
+                    continue;
+                }
                 Resolution::Missing => &mut report.undocumented,
                 Resolution::Ambiguous(_) => &mut report.ambiguous_links,
                 Resolution::Found(_) if !link.is_bare() || has_other_extension(&link.target) => {
@@ -113,19 +151,19 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
         }
     }
 
-    if chapters.iter().any(|chapter| chapter.words > 0) {
-        let page = chapters
+    if scenes.iter().any(|scene| scene.words > 0) {
+        let page = scenes
             .iter()
-            .map(|chapter| prose(&chapter.note.body))
+            .map(|scene| prose(&scene.note.body))
             .collect::<Vec<_>>()
             .join("\n");
-        // Linked from a chapter, or the chapter's point of view: either way, on the page.
-        let linked: HashSet<PathBuf> = chapters
+        // Linked from a scene, or the scene's point of view or location: either way, on the page.
+        let linked: HashSet<PathBuf> = scenes
             .iter()
-            .flat_map(|c| {
-                note_links(&c.note)
+            .flat_map(|s| {
+                note_links(&s.note)
                     .into_iter()
-                    .map(|link| index.resolve(&c.note.path, &link.target))
+                    .map(|link| index.resolve(&s.note.path, &link.target))
             })
             .filter_map(|resolution| match resolution {
                 Resolution::Found(path) => Some(path),
@@ -143,34 +181,34 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
     }
 
     report.misnamed = misnamed(&project.dir)?;
-    let all_notes = chapters
+    let all_notes = scenes
         .iter()
-        .map(|c| (Some(NoteKind::Chapter), &c.note))
-        .chain([(None, &project.note)])
-        .chain(books.iter().map(|book| (None, &book.note)))
-        .chain(bible.iter().map(|(kind, note)| (Some(*kind), note)));
-    for (kind, note) in all_notes {
-        if let Some(name) = drifted(note, kind, project) {
+        .map(|s| &s.note)
+        .chain([&project.note])
+        .chain(books.iter().map(|book| &book.note))
+        .chain(bible.iter().map(|(_, note)| note));
+    for note in all_notes {
+        if let Some(name) = drifted(note, project) {
             report.drifted.push((note.path.clone(), name));
         }
     }
 
-    for chapter in &chapters {
-        let name = &chapter.note.name;
-        if chapter.status().is_none() {
+    for scene in &scenes {
+        let name = &scene.note.name;
+        if scene.status().is_none() {
             report.without_status.push(name.clone());
         }
-        if chapter.synopsis().is_none() {
+        if scene.synopsis().is_none() {
             report.without_synopsis.push(name.clone());
         }
-        if chapter.words == 0 {
-            report.empty_chapters.push(name.clone());
+        if scene.words == 0 {
+            report.empty_scenes.push(name.clone());
         }
     }
     Ok(report)
 }
 
-/// Links in a note's body and in its properties, such as a chapter's `pov`.
+/// Links in a note's body and in its properties, such as a scene's `pov`.
 fn note_links(note: &Note) -> Vec<crate::links::Link> {
     let mut found = links(&note.body);
     for (_, value) in note.frontmatter.entries() {
@@ -245,8 +283,8 @@ fn suggested_name(path: &Path) -> Option<String> {
 }
 
 /// The file name (with `.md`) a kebab-case note should have, if its name has changed since the
-/// file was named. Chapters keep their number, and a project may carry the `-world` suffix.
-fn drifted(note: &Note, kind: Option<NoteKind>, project: &Project) -> Option<String> {
+/// file was named. A project may carry the `-world` suffix.
+fn drifted(note: &Note, project: &Project) -> Option<String> {
     if !is_slug(&note.name) {
         return None;
     }
@@ -254,79 +292,70 @@ fn drifted(note: &Note, kind: Option<NoteKind>, project: &Project) -> Option<Str
     if slug.is_empty() {
         return None;
     }
-    let (prefix, stem) = match kind {
-        Some(NoteKind::Chapter) => {
-            let rest = strip_leading_number(&note.name);
-            (&note.name[..note.name.len() - rest.len()], rest)
-        }
-        _ => ("", note.name.as_str()),
-    };
-    let is_project = kind.is_none() && note.path == project.note.path;
-    let matches =
-        slug_matches(stem, &slug) || (is_project && slug_matches(stem, &format!("{slug}-world")));
-    (!matches).then(|| format!("{prefix}{slug}.md"))
+    let is_project = note.path == project.note.path;
+    let matches = slug_matches(&note.name, &slug)
+        || (is_project && slug_matches(&note.name, &format!("{slug}-world")));
+    (!matches).then(|| format!("{slug}.md"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::Form;
-    use crate::scaffold::{NewBook, NewProject, add_note, create_project};
+    use crate::contents::Place;
+    use crate::note::set_section;
+    use crate::project::{Book, Form};
+    use crate::scaffold::{NewBook, NewProject, add_note, add_scene, create_project};
     use crate::structures::FREEFORM;
     use chrono::NaiveDate;
     use std::fs;
     use tempfile::TempDir;
+
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, 30).unwrap()
+    }
+
+    fn spec(title: &str) -> NewProject<'_> {
+        NewProject {
+            world: None,
+            book: NewBook {
+                title,
+                form: Form::ShortStory,
+                target: None,
+                structure: &FREEFORM,
+                premise: None,
+            },
+        }
+    }
+
+    fn scene(vault: &Vault, project: &Project, book: &Book, name: &str) -> PathBuf {
+        let book = Book::load(&book.dir, &project.slug).unwrap().unwrap();
+        add_scene(vault, project, &book, name, Place::End, today())
+            .unwrap()
+            .path
+    }
 
     #[test]
     fn finds_gaps_both_ways() {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join(".obsidian")).unwrap();
         let vault = Vault::open(dir.path()).unwrap();
-        let today = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
-        let spec = NewProject {
-            world: None,
-            book: NewBook {
-                title: "Other Story",
-                form: Form::ShortStory,
-                target: None,
-                structure: &FREEFORM,
-                premise: None,
-            },
-        };
-        let (project, book) = create_project(&vault, &spec, today).unwrap();
+        let (project, book) = create_project(&vault, &spec("Other Story"), today()).unwrap();
         for (kind, name) in [
             (NoteKind::Character, "Ada Okafor"),
             (NoteKind::Character, "Old Tom"),
             (NoteKind::Location, "The Array"),
             (NoteKind::World, "Orbital Mechanics"),
         ] {
-            add_note(&vault, &project, None, kind, name, today).unwrap();
+            add_note(&vault, &project, kind, name, today()).unwrap();
         }
         let ada = project.folder(NoteKind::Character).join("ada-okafor.md");
         let text = fs::read_to_string(&ada)
             .unwrap()
             .replace("  - \"Ada Okafor\"\n", "  - \"Ada Okafor\"\n  - Ada\n");
         fs::write(&ada, text).unwrap();
-        let chapter = add_note(
-            &vault,
-            &project,
-            Some(&book),
-            NoteKind::Chapter,
-            "Signal",
-            today,
-        )
-        .unwrap()
-        .path;
-        fs::write(&chapter, "---\nstatus: draft\nsynopsis: Ada hears it.\n---\nAda walked to [[the-array|The Array]] to meet [[Captain Reyes]] at [[Orbital Mechanics]].\n").unwrap();
-        add_note(
-            &vault,
-            &project,
-            Some(&book),
-            NoteKind::Chapter,
-            "Empty",
-            today,
-        )
-        .unwrap();
+        let signal = scene(&vault, &project, &book, "Signal");
+        fs::write(&signal, "---\nstatus: draft\nsynopsis: Ada hears it.\n---\nAda walked to [[the-array|The Array]] to meet [[Captain Reyes]] at [[Orbital Mechanics]].\n").unwrap();
+        scene(&vault, &project, &book, "Empty");
 
         let report = check(&vault, &project).unwrap();
         assert_eq!(
@@ -342,22 +371,14 @@ mod tests {
             report.not_on_page,
             [(NoteKind::Character, "old-tom".to_string())]
         );
-        assert_eq!(report.without_synopsis, ["02-empty"]);
+        assert_eq!(report.without_synopsis, ["empty"]);
         assert!(report.without_status.is_empty());
-        assert_eq!(report.empty_chapters, ["02-empty"]);
+        assert_eq!(report.empty_scenes, ["empty"]);
         assert!(report.misnamed.is_empty() && report.drifted.is_empty());
+        assert!(report.broken_entries.is_empty() && report.repeated.is_empty());
         assert!(!report.is_clean());
 
-        let pov = add_note(
-            &vault,
-            &project,
-            Some(&book),
-            NoteKind::Chapter,
-            "Tom's View",
-            today,
-        )
-        .unwrap()
-        .path;
+        let pov = scene(&vault, &project, &book, "Tom's View");
         fs::write(
             &pov,
             "---\npov: \"[[old-tom|Old Tom]]\"\n---\nThe array hummed.\n",
@@ -371,45 +392,57 @@ mod tests {
     }
 
     #[test]
+    fn reports_contents_that_do_not_match_the_scenes() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(".obsidian")).unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        let (project, book) = create_project(&vault, &spec("Sample Story"), today()).unwrap();
+        scene(&vault, &project, &book, "Arrival");
+        add_note(&vault, &project, NoteKind::Character, "Mara", today()).unwrap();
+        let content = fs::read_to_string(&book.note.path).unwrap();
+        let lines = [
+            "- [[arrival]]",
+            "- [[mara]]",
+            "- [[not-written]]",
+            "- [[arrival]]",
+        ]
+        .map(String::from);
+        fs::write(&book.note.path, set_section(&content, "Contents", &lines)).unwrap();
+        let content = fs::read_to_string(&project.note.path).unwrap();
+        let lines = ["- [[sample-story|Sample Story]]", "- [[sequel]]"].map(String::from);
+        fs::write(&project.note.path, set_section(&content, "Books", &lines)).unwrap();
+        let project = Project::load(&project.dir).unwrap().unwrap();
+
+        let report = check(&vault, &project).unwrap();
+        assert_eq!(
+            report.broken_entries.keys().collect::<Vec<_>>(),
+            ["mara", "not-written", "sequel"],
+            "a character isn't a scene"
+        );
+        assert_eq!(
+            report.broken_entries["sequel"].iter().next().unwrap(),
+            "sample-story-world"
+        );
+        assert_eq!(report.repeated, ["arrival"]);
+        assert!(
+            report.undocumented.is_empty(),
+            "reported once, as entries: {:?}",
+            report.undocumented
+        );
+    }
+
+    #[test]
     fn reports_names_and_links_obsidian_cannot_follow() {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join(".obsidian")).unwrap();
         let vault = Vault::open(dir.path()).unwrap();
-        let today = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
-        let spec = |title| NewProject {
-            world: None,
-            book: NewBook {
-                title,
-                form: Form::ShortStory,
-                target: None,
-                structure: &FREEFORM,
-                premise: None,
-            },
-        };
-        let (project, book) = create_project(&vault, &spec("Sample Story"), today).unwrap();
-        let (other, _) = create_project(&vault, &spec("Other Story"), today).unwrap();
+        let (project, book) = create_project(&vault, &spec("Sample Story"), today()).unwrap();
+        let (other, _) = create_project(&vault, &spec("Other Story"), today()).unwrap();
         for project in [&project, &other] {
-            add_note(
-                &vault,
-                project,
-                None,
-                NoteKind::Character,
-                "Ada Okafor",
-                today,
-            )
-            .unwrap();
+            add_note(&vault, project, NoteKind::Character, "Ada Okafor", today()).unwrap();
         }
-        let chapter = add_note(
-            &vault,
-            &project,
-            Some(&book),
-            NoteKind::Chapter,
-            "Signal",
-            today,
-        )
-        .unwrap()
-        .path;
-        fs::write(&chapter, "Ada and [[ada-okafor|her]] sister.\n").unwrap();
+        let signal = scene(&vault, &project, &book, "Signal");
+        fs::write(&signal, "Ada and [[ada-okafor|her]] sister.\n").unwrap();
         let characters = project.folder(NoteKind::Character);
         fs::write(
             characters.join("Old Tom.md"),

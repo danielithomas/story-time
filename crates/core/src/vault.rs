@@ -8,8 +8,9 @@ use anyhow::{Context, Result, bail};
 use chrono::NaiveDateTime;
 
 use crate::config::{self, Config, META_DIR};
+use crate::contents::Contents;
 use crate::history::History;
-use crate::project::{Book, Chapter, Project};
+use crate::project::{Book, Project};
 use crate::text::{natural_cmp, slugify};
 
 #[derive(Debug, Clone)]
@@ -147,18 +148,17 @@ impl Vault {
         }
     }
 
-    /// Every book in every project, with its chapters and word count.
+    /// Every book in every project, with its contents and word count.
     pub fn measure(&self) -> Result<Vec<Measured>> {
         let mut measured = Vec::new();
         for project in self.projects()? {
             for book in project.books()? {
-                let chapters = book.chapters()?;
-                let words = chapters.iter().map(|chapter| chapter.words as u64).sum();
+                let contents = book.contents()?;
                 measured.push(Measured {
                     project: project.clone(),
+                    words: contents.words(),
                     book,
-                    chapters,
-                    words,
+                    contents,
                 });
             }
         }
@@ -193,12 +193,13 @@ impl Vault {
     }
 }
 
-/// A book with its chapters and total words, as measured at one moment.
+/// A book with its contents and total words, as measured at one moment.
 #[derive(Debug, Clone)]
 pub struct Measured {
     pub project: Project,
     pub book: Book,
-    pub chapters: Vec<Chapter>,
+    pub contents: Contents,
+    /// Words in all the book's scenes, placed or not.
     pub words: u64,
 }
 

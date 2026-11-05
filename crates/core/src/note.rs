@@ -49,13 +49,18 @@ pub fn section<'a>(body: &'a str, heading: &str) -> Option<Vec<&'a str>> {
 }
 
 /// A note's text with the lines under `## heading` replaced by `lines`, or with the section
-/// added at the end if the body has none. The frontmatter and the rest of the body stay as
-/// written.
+/// added at the end if the body has none. The section keeps one blank line after its heading and
+/// before the next. The frontmatter and the rest of the body stay as written.
 pub fn set_section(content: &str, heading: &str, lines: &[String]) -> String {
     let (_, body) = split_frontmatter(content);
     let mut out: Vec<String> = body.lines().map(String::from).collect();
     let mut replacement = vec![String::new()];
-    replacement.extend(lines.iter().cloned());
+    replacement.extend(
+        lines
+            .iter()
+            .skip_while(|line| line.trim().is_empty())
+            .cloned(),
+    );
     while replacement
         .last()
         .is_some_and(|line| line.trim().is_empty())
@@ -149,6 +154,30 @@ pub fn save(
     if let Some(body) = body {
         content = replace_body(&content, body);
     }
+    if content != current {
+        write_atomically(path, &content)?;
+    }
+    Ok(Saved::Written {
+        hash: content_hash(&content),
+        words: Note::parse(path, &content).words(),
+    })
+}
+
+/// Replaces the lines under `## heading` in a note, as [`set_section`] does. Like [`save`], it
+/// leaves the file alone if its content no longer matches `base_hash`.
+pub fn save_section(
+    path: &Path,
+    heading: &str,
+    lines: &[String],
+    base_hash: &str,
+) -> Result<Saved> {
+    let current =
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let current_hash = content_hash(&current);
+    if current_hash != base_hash {
+        return Ok(Saved::Conflict { hash: current_hash });
+    }
+    let content = set_section(&current, heading, lines);
     if content != current {
         write_atomically(path, &content)?;
     }

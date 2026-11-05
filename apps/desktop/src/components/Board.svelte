@@ -1,22 +1,53 @@
 <script lang="ts">
-  import { chapterNumber, formatNumber, plainLinks, plural } from "../lib/format";
-  import { addNote, app, openNote } from "../lib/store.svelte";
+  import { formatNumber, plainLinks, plural } from "../lib/format";
+  import { addScene, app, openNote } from "../lib/store.svelte";
+  import type { ScenePlace, SceneRef } from "../lib/types";
 
-  let adding = $state(false);
+  /** Where the scene being added goes, as a key: "end", "unplaced" or "chapter:N". */
+  let adding = $state<string | null>(null);
   let title = $state("");
 
-  async function submit(event: SubmitEvent) {
+  const key = (place: ScenePlace) => (typeof place === "object" ? `chapter:${place.chapter}` : place);
+
+  async function submit(event: SubmitEvent, place: ScenePlace) {
     event.preventDefault();
     const value = title.trim();
-    adding = false;
+    adding = null;
     title = "";
-    if (value) await addNote("chapter", value);
+    if (value) await addScene(value, place);
   }
 
   function focus(node: HTMLInputElement) {
     node.focus();
   }
+
+  const where = (scene: SceneRef) => [scene.pov, scene.location].filter(Boolean).map((s) => plainLinks(s!)).join(" · ");
 </script>
+
+{#snippet card(scene: SceneRef)}
+  <button class="card" onclick={() => openNote(scene.path)}>
+    <div class="row">
+      <span class="when">{scene.when ?? ""}</span>
+      <span class="badge" data-status={scene.status ?? ""}>{scene.status ?? "no status"}</span>
+    </div>
+    <h3>{scene.title}</h3>
+    <p class="synopsis" class:none={!scene.synopsis}>{scene.synopsis ?? "No synopsis yet"}</p>
+    <div class="row foot">
+      <span>{where(scene)}</span>
+      <span>{formatNumber(scene.words)} words</span>
+    </div>
+  </button>
+{/snippet}
+
+{#snippet addCard(place: ScenePlace, label: string)}
+  {#if adding === key(place)}
+    <form class="card new" onsubmit={(e) => submit(e, place)}>
+      <input bind:value={title} placeholder="Scene title" use:focus onblur={() => (adding = null)} />
+    </form>
+  {:else}
+    <button class="card new" onclick={() => (adding = key(place))}>{label}</button>
+  {/if}
+{/snippet}
 
 {#if app.tree?.book}
   {@const book = app.tree.book}
@@ -24,35 +55,45 @@
     <header>
       <h1>{book.summary.title}</h1>
       <p class="muted">
-        {plural(book.chapters.length, "chapter")} · {plural(book.summary.words, "word")}. Each card shows a chapter's
-        synopsis; set it in the inspector while writing.
+        {plural(book.summary.chapters, "chapter")} · {plural(book.summary.scenes, "scene")} · {plural(book.summary.words, "word")}.
+        Each card shows a scene's synopsis; set it in the inspector while writing.
       </p>
     </header>
 
-    <div class="cards">
-      {#each book.chapters as chapter (chapter.path)}
-        <button class="card" onclick={() => openNote(chapter.path)}>
-          <div class="row">
-            <span class="number">{chapterNumber(chapter.number)}</span>
-            <span class="badge" data-status={chapter.status ?? ""}>{chapter.status ?? "no status"}</span>
-          </div>
-          <h3>{chapter.title}</h3>
-          <p class="synopsis" class:none={!chapter.synopsis}>{chapter.synopsis ?? "No synopsis yet"}</p>
-          <div class="row foot">
-            <span>{chapter.pov ? `POV: ${plainLinks(chapter.pov)}` : ""}</span>
-            <span>{formatNumber(chapter.words)} words</span>
-          </div>
-        </button>
-      {/each}
-
-      {#if adding}
-        <form class="card new" onsubmit={submit}>
-          <input bind:value={title} placeholder="Chapter title" use:focus onblur={() => (adding = false)} />
-        </form>
-      {:else}
-        <button class="card new" onclick={() => (adding = true)}>+ Add a chapter</button>
+    {#each book.parts as part, p (p)}
+      {#if part.title}
+        <h2 class="part">{part.title}</h2>
       {/if}
-    </div>
+      {#each part.chapters as chapter (chapter.index)}
+        <section>
+          <h2>{chapter.heading} <span class="muted">· {plural(chapter.words, "word")}</span></h2>
+          <div class="cards">
+            {#each chapter.scenes as scene (scene.path)}
+              {@render card(scene)}
+            {/each}
+            {@render addCard({ chapter: chapter.index }, "+ Add a scene")}
+          </div>
+        </section>
+      {/each}
+    {/each}
+
+    <section>
+      <div class="cards">
+        {@render addCard("end", "+ Add a scene in a new chapter")}
+      </div>
+    </section>
+
+    {#if book.unplaced.length}
+      <section>
+        <h2>Unplaced <span class="muted">· not in the contents yet</span></h2>
+        <div class="cards">
+          {#each book.unplaced as scene (scene.path)}
+            {@render card(scene)}
+          {/each}
+          {@render addCard("unplaced", "+ Add an unplaced scene")}
+        </div>
+      </section>
+    {/if}
   </div>
 {/if}
 
@@ -76,6 +117,30 @@
     margin: 0;
   }
 
+  section {
+    margin-bottom: 1.6rem;
+  }
+
+  h2 {
+    font-size: 15px;
+    margin-bottom: 0.7rem;
+  }
+
+  h2 .muted {
+    font-weight: normal;
+    font-size: 13px;
+  }
+
+  h2.part {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 2rem 0 0.9rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--line);
+  }
+
   .cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -86,7 +151,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    min-height: 190px;
+    min-height: 170px;
     padding: 0.9rem 1rem;
     text-align: left;
     background: var(--bg);
@@ -106,9 +171,12 @@
     gap: 0.5rem;
   }
 
-  .number {
+  .when {
     color: var(--muted);
-    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   h3 {
@@ -145,5 +213,6 @@
     border-style: dashed;
     background: transparent;
     color: var(--muted);
+    min-height: 90px;
   }
 </style>

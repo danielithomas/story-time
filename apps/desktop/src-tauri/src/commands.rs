@@ -10,16 +10,17 @@ use chrono::{Days, Local};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use story_time_core::compile::{self, Format};
+use story_time_core::contents::{Contents, Place};
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::links::LinkIndex;
 use story_time_core::note::{self, Note, PropertyValue, Saved};
-use story_time_core::project::{BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, CHAPTER_STATUSES};
+use story_time_core::project::{BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, SCENE_STATUSES};
 use story_time_core::scaffold::{self, NewBook, NewProject};
 use story_time_core::structures::{self, STRUCTURES};
 use story_time_core::text::thousands;
 use story_time_core::vault::{self as vaults, Measured};
-use story_time_core::{Book, Chapter, Form, NoteKind, Project, Vault, check, config, words};
+use story_time_core::{Book, Form, NoteKind, Project, Scene, Vault, check, config, words};
 use tauri::{State, WebviewWindow};
 
 type CmdResult<T> = Result<T, String>;
@@ -127,11 +128,14 @@ pub struct BookSummary {
     form_label: Option<String>,
     target: Option<u64>,
     deadline: Option<String>,
+    /// Words in all the book's scenes, placed or not.
     words: u64,
+    scenes: usize,
     chapters: usize,
+    unplaced: usize,
 }
 
-fn book_summary(book: &Book, chapters: &[Chapter]) -> BookSummary {
+fn book_summary(book: &Book, contents: &Contents) -> BookSummary {
     BookSummary {
         slug: book.slug.clone(),
         title: book.title(),
@@ -140,8 +144,10 @@ fn book_summary(book: &Book, chapters: &[Chapter]) -> BookSummary {
         form_label: book.form().map(|form| form.label().to_string()),
         target: book.target(),
         deadline: book.deadline().map(|date| date.to_string()),
-        words: chapters.iter().map(|chapter| chapter.words as u64).sum(),
-        chapters: chapters.len(),
+        words: contents.words(),
+        scenes: contents.scenes().count(),
+        chapters: contents.chapters().count(),
+        unplaced: contents.unplaced.len(),
     }
 }
 
@@ -150,7 +156,7 @@ fn project_summary(project: &Project) -> CmdResult<ProjectSummary> {
         .books()
         .or_message()?
         .iter()
-        .map(|book| Ok(book_summary(book, &book.chapters().or_message()?)))
+        .map(|book| Ok(book_summary(book, &book.contents().or_message()?)))
         .collect::<CmdResult<Vec<_>>>()?;
     Ok(ProjectSummary {
         slug: project.slug.clone(),
@@ -178,15 +184,50 @@ fn note_ref(note: &Note) -> NoteRef {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChapterRef {
+pub struct SceneRef {
     path: String,
     name: String,
     title: String,
-    number: Option<u32>,
     status: Option<String>,
     pov: Option<String>,
+    location: Option<String>,
+    when: Option<String>,
     synopsis: Option<String>,
     words: usize,
+}
+
+fn scene_ref(scene: &Scene) -> SceneRef {
+    SceneRef {
+        path: scene.note.path.display().to_string(),
+        name: scene.note.name.clone(),
+        title: scene.title(),
+        status: scene.status(),
+        pov: scene.pov(),
+        location: scene.location(),
+        when: scene.when(),
+        synopsis: scene.synopsis(),
+        words: scene.words,
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartRef {
+    /// `None` for chapters before the first part, or in a book without parts.
+    title: Option<String>,
+    chapters: Vec<ChapterRef>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterRef {
+    /// Its position in the book, counting from 0 across parts: where a new scene can be added.
+    index: usize,
+    /// What it is called on the page: its title, or "Chapter 3".
+    heading: String,
+    title: Option<String>,
+    scenes: Vec<SceneRef>,
+    words: u64,
 }
 
 /// A project's notes, with one of its books open.
@@ -201,13 +242,56 @@ pub struct ProjectTree {
     world: Vec<NoteRef>,
 }
 
+/// A book's notes, with its scenes as its contents list them.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BookTree {
     summary: BookSummary,
     note: NoteRef,
     flow_note: Option<NoteRef>,
-    chapters: Vec<ChapterRef>,
+    has_parts: bool,
+    parts: Vec<PartRef>,
+    unplaced: Vec<SceneRef>,
+}
+
+fn book_tree(book: &Book) -> CmdResult<BookTree> {
+    let contents = book.contents().or_message()?;
+    let flow_path = book.flow_path();
+    let flow_note = if flow_path.is_file() {
+        Some(note_ref(&Note::load(&flow_path).or_message()?))
+    } else {
+        None
+    };
+    let mut index = 0;
+    let parts = contents
+        .parts
+        .iter()
+        .map(|part| PartRef {
+            title: part.title.clone(),
+            chapters: part
+                .chapters
+                .iter()
+                .map(|chapter| {
+                    index += 1;
+                    ChapterRef {
+                        index: index - 1,
+                        heading: chapter.heading(),
+                        title: chapter.title.clone(),
+                        scenes: chapter.scenes.iter().map(scene_ref).collect(),
+                        words: chapter.words(),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    Ok(BookTree {
+        summary: book_summary(book, &contents),
+        note: note_ref(&book.note),
+        flow_note,
+        has_parts: contents.has_parts(),
+        parts,
+        unplaced: contents.unplaced.iter().map(scene_ref).collect(),
+    })
 }
 
 #[derive(Serialize)]
@@ -215,7 +299,7 @@ pub struct BookTree {
 pub struct NoteDoc {
     path: String,
     name: String,
-    /// project, book, flow, chapter, character, location, world or note.
+    /// project, book, flow, scene, character, location, world or note.
     kind: String,
     project: Option<String>,
     book: Option<String>,
@@ -250,7 +334,7 @@ pub struct Choices {
     forms: Vec<Choice>,
     structures: Vec<Choice>,
     formats: Vec<Choice>,
-    chapter_statuses: Vec<String>,
+    scene_statuses: Vec<String>,
     book_statuses: Vec<String>,
 }
 
@@ -281,7 +365,11 @@ fn classify(vault: &Vault, path: &Path) -> (String, Option<String>, Option<Strin
         [_, books, book, file] if books == BOOKS_DIR && *file == format!("{book}-flow.md") => {
             "flow"
         }
-        [_, books, _, folder, _, ..] if books == BOOKS_DIR && folder == "chapters" => "chapter",
+        [_, books, _, folder, _, ..]
+            if books == BOOKS_DIR && folder == NoteKind::Scene.folder() =>
+        {
+            "scene"
+        }
         [_, bible, folder, _, ..] if bible == BIBLE_DIR => NoteKind::ALL
             .into_iter()
             .find(|kind| kind.is_bible() && kind.folder() == folder.as_str())
@@ -412,7 +500,7 @@ pub fn choices() -> Choices {
                 detail: format.describe().into(),
             })
             .into(),
-        chapter_statuses: strings(&CHAPTER_STATUSES),
+        scene_statuses: strings(&SCENE_STATUSES),
         book_statuses: strings(&BOOK_STATUSES),
     }
 }
@@ -440,36 +528,7 @@ pub async fn project_tree(
         Some(book) => books.iter().find(|b| b.slug == book).or(books.first()),
         None => books.first(),
     };
-    let book = match open {
-        Some(book) => {
-            let chapters = book.chapters().or_message()?;
-            let flow_path = book.flow_path();
-            let flow_note = if flow_path.is_file() {
-                Some(note_ref(&Note::load(&flow_path).or_message()?))
-            } else {
-                None
-            };
-            Some(BookTree {
-                summary: book_summary(book, &chapters),
-                note: note_ref(&book.note),
-                flow_note,
-                chapters: chapters
-                    .iter()
-                    .map(|chapter| ChapterRef {
-                        path: chapter.note.path.display().to_string(),
-                        name: chapter.note.name.clone(),
-                        title: chapter.title(),
-                        number: chapter.number(),
-                        status: chapter.status(),
-                        pov: chapter.pov(),
-                        synopsis: chapter.synopsis(),
-                        words: chapter.words,
-                    })
-                    .collect(),
-            })
-        }
-        None => None,
-    };
+    let book = open.map(book_tree).transpose()?;
     let refs = |kind| -> CmdResult<Vec<NoteRef>> {
         Ok(project
             .notes(kind)
@@ -630,38 +689,57 @@ pub struct AddedNote {
     same_name: Option<String>,
 }
 
-/// Adds a chapter to a book, or a world-bible note to the project.
-#[tauri::command]
-pub async fn add_note(
-    slug: String,
-    book: Option<String>,
-    kind: String,
-    name: String,
-    state: State<'_, AppState>,
-) -> CmdResult<AddedNote> {
-    let kind = NoteKind::from_key(&kind).ok_or_else(|| format!("unknown note kind \"{kind}\""))?;
-    let (vault, project, book) = if kind.is_bible() {
-        let (vault, project) = state.project(&slug)?;
-        (vault, project, None)
-    } else {
-        let (vault, project, book) = state.book(&slug, book.as_deref())?;
-        (vault, project, Some(book))
-    };
-    let added = scaffold::add_note(
-        &vault,
-        &project,
-        book.as_ref(),
-        kind,
-        &name,
-        Local::now().date_naive(),
-    )
-    .or_message()?;
+fn added_note(vault: &Vault, added: scaffold::NewNote) -> CmdResult<AddedNote> {
     Ok(AddedNote {
         note: note_ref(&Note::load(&added.path).or_message()?),
         same_name: added
             .same_name
             .map(|path| vault.relative(&path).display().to_string()),
     })
+}
+
+/// Adds a character, location or world note to the project's world bible.
+#[tauri::command]
+pub async fn add_note(
+    slug: String,
+    kind: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> CmdResult<AddedNote> {
+    let kind = NoteKind::from_key(&kind).ok_or_else(|| format!("unknown note kind \"{kind}\""))?;
+    let (vault, project) = state.project(&slug)?;
+    let added = scaffold::add_note(&vault, &project, kind, &name, Local::now().date_naive())
+        .or_message()?;
+    added_note(&vault, added)
+}
+
+/// Adds a scene to a book: at the end of chapter `chapter` (counting from 0), else at the end of
+/// the contents as a chapter of its own, or with `unplaced`, outside the contents.
+#[tauri::command]
+pub async fn add_scene(
+    slug: String,
+    book: Option<String>,
+    name: String,
+    chapter: Option<usize>,
+    unplaced: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<AddedNote> {
+    let (vault, project, book) = state.book(&slug, book.as_deref())?;
+    let place = match (unplaced, chapter) {
+        (true, _) => Place::Unplaced,
+        (false, Some(n)) => Place::Chapter(n),
+        (false, None) => Place::End,
+    };
+    let added = scaffold::add_scene(
+        &vault,
+        &project,
+        &book,
+        &name,
+        place,
+        Local::now().date_naive(),
+    )
+    .or_message()?;
+    added_note(&vault, added)
 }
 
 /// A link from one note to another that both Story Time and Obsidian follow.
@@ -713,7 +791,7 @@ pub async fn record_snapshot(state: State<'_, AppState>) -> CmdResult<()> {
 #[serde(rename_all = "camelCase")]
 pub struct StatusCount {
     status: String,
-    chapters: usize,
+    scenes: usize,
     words: u64,
 }
 
@@ -728,6 +806,8 @@ pub struct DayWords {
 #[serde(rename_all = "camelCase")]
 pub struct BookProgress {
     book: BookSummary,
+    /// Words in the placed scenes: the manuscript.
+    placed_words: u64,
     /// The project's title: the world the book is set in.
     world_title: String,
     genre: Vec<String>,
@@ -763,7 +843,7 @@ pub async fn book_progress(
     let Measured {
         project,
         book,
-        chapters,
+        contents,
         words,
     } = measured
         .into_iter()
@@ -780,20 +860,21 @@ pub async fn book_progress(
         }
         _ => None,
     };
-    let length = (words > 0).then(|| Form::for_length(words));
+    let placed = contents.placed_words();
+    let length = (placed > 0).then(|| Form::for_length(placed));
 
     let mut statuses: Vec<StatusCount> = Vec::new();
-    for chapter in &chapters {
-        let status = chapter.status().unwrap_or_else(|| "no status".to_string());
+    for scene in contents.scenes() {
+        let status = scene.status().unwrap_or_else(|| "no status".to_string());
         match statuses.iter_mut().find(|count| count.status == status) {
             Some(count) => {
-                count.chapters += 1;
-                count.words += chapter.words as u64;
+                count.scenes += 1;
+                count.words += scene.words as u64;
             }
             None => statuses.push(StatusCount {
                 status,
-                chapters: 1,
-                words: chapter.words as u64,
+                scenes: 1,
+                words: scene.words as u64,
             }),
         }
     }
@@ -810,13 +891,14 @@ pub async fn book_progress(
     let count = |kind| project.notes(kind).map(|notes| notes.len()).or_message();
 
     Ok(BookProgress {
-        book: book_summary(&book, &chapters),
+        book: book_summary(&book, &contents),
+        placed_words: placed,
         world_title: project.title(),
         genre: project.genre(),
         length_label: length.map(|form| form.label().to_string()),
         length_range: length.map(|form| form.range().to_string()),
-        pages: words.div_ceil(vault.config.words_per_page.max(1)),
-        reading_minutes: words.div_ceil(vault.config.reading_wpm.max(1)),
+        pages: placed.div_ceil(vault.config.words_per_page.max(1)),
+        reading_minutes: placed.div_ceil(vault.config.reading_wpm.max(1)),
         days_left,
         words_per_day,
         today: history.written_on(today, Some(&book.log_key())),
@@ -864,12 +946,14 @@ pub struct CheckReport {
     undocumented: Vec<Mention>,
     ambiguous_links: Vec<Mention>,
     alias_links: Vec<Mention>,
+    broken_entries: Vec<Mention>,
+    repeated: Vec<String>,
     not_on_page: Vec<BibleNote>,
     misnamed: Vec<Rename>,
     drifted: Vec<Rename>,
     without_status: Vec<String>,
     without_synopsis: Vec<String>,
-    empty_chapters: Vec<String>,
+    empty_scenes: Vec<String>,
     unreadable: Vec<Unreadable>,
 }
 
@@ -899,6 +983,8 @@ pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResul
         undocumented: mentions(report.undocumented),
         ambiguous_links: mentions(report.ambiguous_links),
         alias_links: mentions(report.alias_links),
+        broken_entries: mentions(report.broken_entries),
+        repeated: report.repeated,
         misnamed: renames(report.misnamed),
         drifted: renames(report.drifted),
         not_on_page: report
@@ -911,7 +997,7 @@ pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResul
             .collect(),
         without_status: report.without_status,
         without_synopsis: report.without_synopsis,
-        empty_chapters: report.empty_chapters,
+        empty_scenes: report.empty_scenes,
         unreadable: report
             .unreadable_frontmatter
             .into_iter()
@@ -928,6 +1014,7 @@ pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResul
 pub struct CompileResult {
     path: String,
     chapters: usize,
+    scenes: usize,
     words: usize,
     skipped: Vec<String>,
 }
@@ -942,9 +1029,9 @@ pub async fn compile_book(
     let (vault, project, book) = state.book(&slug, book.as_deref())?;
     let format = Format::from_key(&format).ok_or_else(|| format!("unknown format \"{format}\""))?;
     let manuscript = compile::manuscript(&book, vault.config.author.as_deref()).or_message()?;
-    if manuscript.chapters == 0 {
+    if manuscript.scenes == 0 {
         return Err(format!(
-            "{} has no chapters with words in them yet",
+            "{} has no scenes with words in them in its contents yet",
             book.title()
         ));
     }
@@ -956,6 +1043,7 @@ pub async fn compile_book(
     Ok(CompileResult {
         path: out.display().to_string(),
         chapters: manuscript.chapters,
+        scenes: manuscript.scenes,
         words: manuscript.words,
         skipped: manuscript.skipped,
     })

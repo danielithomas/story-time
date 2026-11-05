@@ -9,11 +9,15 @@ use anyhow::{Context, Result, bail};
 use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::config::{CONFIG_FILE, Config, DEFAULT_CONFIG, META_DIR};
+use crate::contents::{self, Place};
 use crate::history::History;
 use crate::ideas;
 use crate::ids;
 use crate::links::LinkIndex;
-use crate::note::{Note, PropertyValue, section, set_properties, set_section};
+use crate::note::{
+    Note, PropertyValue, Saved, content_hash, save_section, section, set_properties,
+    split_frontmatter,
+};
 use crate::project::{BIBLE_DIR, BOOKS_HEADING, Book, Form, NoteKind, Project, RESERVED};
 use crate::structures::{self, Structure};
 use crate::templates::{self, render};
@@ -198,8 +202,8 @@ pub fn add_book(
     create_book(vault, project, spec, &taken_ids(vault)?, today)
 }
 
-/// Creates `books/<slug>/` with the book note, its story flow and `chapters/`, and adds the book
-/// to the project note's `## Books` list.
+/// Creates `books/<slug>/` with the book note, its story flow and `scenes/`, and adds the book to
+/// the project note's `## Books` list.
 fn create_book(
     vault: &Vault,
     project: &Project,
@@ -214,7 +218,7 @@ fn create_book(
     let stems = project_stems(project, None)?;
     let slug = unique_slug(&slug, |candidate| stems.contains(candidate));
     let dir = project.books_dir().join(&slug);
-    fs::create_dir_all(dir.join(NoteKind::Chapter.folder()))
+    fs::create_dir_all(dir.join(NoteKind::Scene.folder()))
         .with_context(|| format!("creating {}", dir.display()))?;
     let note_path = dir.join(format!("{slug}.md"));
     let flow_path = dir.join(format!("{slug}-flow.md"));
@@ -249,7 +253,9 @@ fn create_book(
     )?;
     write_new(&flow_path, &render(&templates::FLOW.load(vault)?, &vars))?;
 
-    let mut listed: Vec<String> = section(&project.note.body, BOOKS_HEADING)
+    let content = fs::read_to_string(&project.note.path)
+        .with_context(|| format!("reading {}", project.note.path.display()))?;
+    let mut listed: Vec<String> = section(split_frontmatter(&content).1, BOOKS_HEADING)
         .unwrap_or_default()
         .into_iter()
         .map(String::from)
@@ -259,13 +265,19 @@ fn create_book(
         "- {}",
         index.link(&project.note.path, &note_path, spec.title)
     ));
-    let content = fs::read_to_string(&project.note.path)
-        .with_context(|| format!("reading {}", project.note.path.display()))?;
-    fs::write(
+    let saved = save_section(
         &project.note.path,
-        set_section(&content, BOOKS_HEADING, &listed),
-    )
-    .with_context(|| format!("writing {}", project.note.path.display()))?;
+        BOOKS_HEADING,
+        &listed,
+        &content_hash(&content),
+    )?;
+    if let Saved::Conflict { .. } = saved {
+        bail!(
+            "{} was created, but the project note changed on disk before the book could be \
+             listed in it. Add it under ## Books.",
+            vault.relative(&dir).display()
+        );
+    }
     Book::load(&dir, &project.slug)?.context("the book note was not created")
 }
 
@@ -282,15 +294,15 @@ fn taken_ids(vault: &Vault) -> Result<HashSet<String>> {
 }
 
 /// Lower-cased file names of the project's notes, which must be unique within it. With `book`,
-/// chapters in the project's other books are left out, since chapters in different books may
-/// share a name.
+/// scenes in the project's other books are left out, since scenes in different books may share a
+/// name.
 fn project_stems(project: &Project, book: Option<&Book>) -> Result<HashSet<String>> {
     let others: Vec<PathBuf> = match book {
         Some(book) => project
             .books()?
             .iter()
             .filter(|other| other.dir != book.dir)
-            .map(Book::chapters_dir)
+            .map(Book::scenes_dir)
             .collect(),
         None => Vec::new(),
     };
@@ -373,53 +385,108 @@ pub struct NewNote {
     pub same_name: Option<PathBuf>,
 }
 
-/// Adds a note from its template: a chapter to `book`, or a world-bible note to the project. The
-/// file is named with the slug of `name`, which becomes the note's first alias, and chapters are
-/// numbered after the highest existing number. Adding a name the project already has for this
+/// Adds a world-bible note to the project from its template. The file is named with the slug of
+/// `name`, which becomes the note's first alias. Adding a name the project already has for this
 /// kind of note fails; a different name whose slug is already taken in the project gets a
 /// numbered slug (`maras-2`).
 pub fn add_note(
+    vault: &Vault,
+    project: &Project,
+    kind: NoteKind,
+    name: &str,
+    today: NaiveDate,
+) -> Result<NewNote> {
+    if !kind.is_bible() {
+        bail!("a scene needs a book to go in");
+    }
+    let new = prepare(vault, project, None, kind, name, today)?;
+    write_new(&new.path, &new.text)?;
+    new.created(vault)
+}
+
+/// Adds a scene to `book` from its template, named as [`add_note`] names notes, and lists it in
+/// the book's contents at `place`. Scenes in different books may share a name. Only the
+/// `## Contents` section of the book note changes, and not if the note changed on disk meanwhile.
+pub fn add_scene(
+    vault: &Vault,
+    project: &Project,
+    book: &Book,
+    name: &str,
+    place: Place,
+    today: NaiveDate,
+) -> Result<NewNote> {
+    let new = prepare(vault, project, Some(book), NoteKind::Scene, name, today)?;
+    let content = fs::read_to_string(&book.note.path)
+        .with_context(|| format!("reading {}", book.note.path.display()))?;
+    let lines = section(split_frontmatter(&content).1, contents::HEADING).unwrap_or_default();
+    let link = LinkIndex::build(vault)?.link(&book.note.path, &new.path, &new.name);
+    let listed = contents::insert(&lines, place, &link)?;
+    write_new(&new.path, &new.text)?;
+    if place != Place::Unplaced {
+        let saved = save_section(
+            &book.note.path,
+            contents::HEADING,
+            &listed,
+            &content_hash(&content),
+        )?;
+        if let Saved::Conflict { .. } = saved {
+            bail!(
+                "{} was created, but the book note changed on disk before the scene could be \
+                 listed in its contents, so it is unplaced",
+                vault.relative(&new.path).display()
+            );
+        }
+    }
+    new.created(vault)
+}
+
+/// A note about to be created: where, and its text.
+struct Prepared {
+    path: PathBuf,
+    name: String,
+    slug: String,
+    text: String,
+}
+
+impl Prepared {
+    fn created(self, vault: &Vault) -> Result<NewNote> {
+        let same_name = vault.note_named(&self.slug, &self.path)?;
+        Ok(NewNote {
+            path: self.path,
+            same_name,
+        })
+    }
+}
+
+fn prepare(
     vault: &Vault,
     project: &Project,
     book: Option<&Book>,
     kind: NoteKind,
     name: &str,
     today: NaiveDate,
-) -> Result<NewNote> {
+) -> Result<Prepared> {
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let slug = slugify(&name);
     if slug.is_empty() {
         bail!("the name needs at least one letter or number");
     }
-    let (folder, existing, base) = match (kind, book) {
-        (NoteKind::Chapter, None) => bail!("a chapter needs a book to go in"),
-        (NoteKind::Chapter, Some(book)) => {
-            let chapters = book.chapters()?;
-            let next = chapters
-                .iter()
-                .filter_map(|chapter| chapter.number())
-                .max()
-                .unwrap_or(0)
-                + 1;
-            let notes = chapters.into_iter().map(|c| c.note).collect();
-            (book.chapters_dir(), notes, format!("{next:02}-{slug}"))
+    let (folder, existing, owner) = match book {
+        Some(book) => {
+            let scenes = book.scenes()?.into_iter().map(|scene| scene.note).collect();
+            (book.scenes_dir(), scenes, book.title())
         }
-        (kind, _) => (project.folder(kind), project.notes(kind)?, slug),
+        None => (project.folder(kind), project.notes(kind)?, project.title()),
     };
     if existing
         .iter()
         .any(|note| note.title().eq_ignore_ascii_case(&name))
     {
-        bail!(
-            "{} already has a {} called {name}",
-            book.filter(|_| kind == NoteKind::Chapter)
-                .map_or_else(|| project.title(), Book::title),
-            kind.key()
-        );
+        bail!("{owner} already has a {} called {name}", kind.key());
     }
-    let taken = project_stems(project, book.filter(|_| kind == NoteKind::Chapter))?;
-    let file_name = unique_slug(&base, |candidate| taken.contains(candidate));
-    let path = folder.join(format!("{file_name}.md"));
+    let taken = project_stems(project, book)?;
+    let slug = unique_slug(&slug, |candidate| taken.contains(candidate));
+    let path = folder.join(format!("{slug}.md"));
     let project_title = project.title();
     let book_title = book.map(Book::title).unwrap_or_default();
     let date = today.format("%Y-%m-%d").to_string();
@@ -430,9 +497,12 @@ pub fn add_note(
         ("date", date.as_str()),
     ];
     let note = render(&templates::for_kind(kind).load(vault)?, &vars);
-    write_new(&path, &with_first_alias(&path, &note, &name))?;
-    let same_name = vault.note_named(&file_name, &path)?;
-    Ok(NewNote { path, same_name })
+    Ok(Prepared {
+        text: with_first_alias(&path, &note, &name),
+        path,
+        name,
+        slug,
+    })
 }
 
 /// A note's text with `name` as its first alias, keeping any other aliases the template gave it.
@@ -449,6 +519,7 @@ fn with_first_alias(path: &Path, note: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Scene;
     use crate::structures::THREE_ACT;
     use tempfile::TempDir;
 
@@ -604,87 +675,83 @@ mod tests {
     }
 
     #[test]
-    fn adds_chapters_to_books_and_notes_to_the_world_bible() {
+    fn adds_scenes_to_books_and_notes_to_the_world_bible() {
         let (_dir, vault) = vault();
         let (project, first) =
             create_project(&vault, &standalone("Sample Story"), today()).unwrap();
         let second = add_book(&vault, &project, &book("Second Story"), today()).unwrap();
-        let chapter = |book: &Book, name| {
-            add_note(
-                &vault,
-                &project,
-                Some(book),
-                NoteKind::Chapter,
-                name,
-                today(),
-            )
-            .unwrap()
+        let scene = |book: &Book, name, place| {
+            let book = Book::load(&book.dir, &project.slug).unwrap().unwrap();
+            add_scene(&vault, &project, &book, name, place, today()).unwrap()
         };
-        let arrival = chapter(&first, "Arrival");
-        let leaving = chapter(&first, "Leaving: Home?");
+        let arrival = scene(&first, "Arrival", Place::End);
+        let leaving = scene(&first, "Leaving: Home?", Place::End);
+        scene(&first, "First Light", Place::Chapter(0));
+        scene(&first, "Fragment", Place::Unplaced);
         assert!(
             arrival
                 .path
-                .ends_with("books/sample-story/chapters/01-arrival.md")
+                .ends_with("books/sample-story/scenes/arrival.md")
         );
         assert!(
             leaving
                 .path
-                .ends_with("books/sample-story/chapters/02-leaving-home.md")
+                .ends_with("books/sample-story/scenes/leaving-home.md")
         );
-        let chapters = first.chapters().unwrap();
+        let first = Book::load(&first.dir, &project.slug).unwrap().unwrap();
         assert_eq!(
-            chapters[1].title(),
-            "Leaving: Home?",
-            "the name keeps its punctuation"
+            section(&first.note.body, contents::HEADING).unwrap()[1..],
+            [
+                "%% The book in reading order. A list item that isn't a link is a chapter, with its scenes indented beneath it as links; a link on its own is a chapter by itself. ### headings make parts. %%",
+                "",
+                "- Chapter",
+                "  - [[arrival|Arrival]]",
+                "  - [[first-light|First Light]]",
+                "- [[leaving-home|Leaving: Home?]]",
+                "",
+            ]
         );
-        assert_eq!(chapters[1].status().as_deref(), Some("outline"));
+        let contents = first.contents().unwrap();
+        let placed: Vec<String> = contents.placed().map(Scene::title).collect();
+        assert_eq!(placed, ["Arrival", "First Light", "Leaving: Home?"]);
+        assert_eq!(contents.unplaced[0].title(), "Fragment");
+        let leaving = &contents.chapters().nth(1).unwrap().scenes[0];
+        assert_eq!(leaving.status().as_deref(), Some("outline"));
         assert_eq!(
-            chapters[1].words, 0,
-            "a new chapter holds only its heading and a comment"
+            leaving.words, 0,
+            "a new scene holds only its heading and a comment"
         );
-        assert!(
-            chapter(&second, "Arrival")
-                .path
-                .ends_with("books/second-story/chapters/01-arrival.md"),
-            "chapters in different books may share a name"
-        );
-        assert!(add_note(&vault, &project, None, NoteKind::Chapter, "Lost", today()).is_err());
 
-        let mara = add_note(
-            &vault,
-            &project,
-            None,
-            NoteKind::Character,
-            "Mara Chen",
-            today(),
-        )
-        .unwrap();
+        let morning = scene(&second, "Arrival", Place::End);
+        assert!(
+            morning
+                .path
+                .ends_with("books/second-story/scenes/arrival.md"),
+            "scenes in different books may share a name"
+        );
+        assert!(morning.same_name.is_some());
+        let second = Book::load(&second.dir, &project.slug).unwrap().unwrap();
+        assert!(
+            second.note.body.contains("- [[scenes/arrival|Arrival]]"),
+            "a shared name is linked by its path"
+        );
+        assert_eq!(second.contents().unwrap().placed().count(), 1);
+        assert!(
+            add_scene(&vault, &project, &first, "Arrival", Place::End, today()).is_err(),
+            "a book's scene names are unique"
+        );
+        assert!(add_scene(&vault, &project, &first, "Lost", Place::Chapter(5), today()).is_err());
+        assert!(!first.scenes_dir().join("lost.md").exists());
+        assert!(add_note(&vault, &project, NoteKind::Scene, "Lost", today()).is_err());
+
+        let mara = add_note(&vault, &project, NoteKind::Character, "Mara Chen", today()).unwrap();
         assert!(
             mara.path
                 .ends_with("sample-story-world/bible/characters/mara-chen.md")
         );
         assert!(mara.same_name.is_none());
-        assert!(
-            add_note(
-                &vault,
-                &project,
-                None,
-                NoteKind::Character,
-                "Mara Chen",
-                today()
-            )
-            .is_err()
-        );
-        let place = add_note(
-            &vault,
-            &project,
-            None,
-            NoteKind::Location,
-            "Mara Chen",
-            today(),
-        )
-        .unwrap();
+        assert!(add_note(&vault, &project, NoteKind::Character, "Mara Chen", today()).is_err());
+        let place = add_note(&vault, &project, NoteKind::Location, "Mara Chen", today()).unwrap();
         assert!(
             place.path.ends_with("bible/locations/mara-chen-2.md"),
             "file names are unique within the project"
@@ -706,15 +773,7 @@ mod tests {
             "---\ntype: location\n---\n# {{title}} in {{project}}\n",
         )
         .unwrap();
-        let place = add_note(
-            &vault,
-            &project,
-            None,
-            NoteKind::Location,
-            "The Lab",
-            today(),
-        )
-        .unwrap();
+        let place = add_note(&vault, &project, NoteKind::Location, "The Lab", today()).unwrap();
         assert_eq!(
             fs::read_to_string(place.path).unwrap(),
             "---\ntype: location\naliases:\n  - The Lab\n---\n# The Lab in Other Story\n",

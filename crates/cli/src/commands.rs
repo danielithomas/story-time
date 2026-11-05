@@ -6,11 +6,12 @@ use anyhow::{Context, Result, bail};
 use chrono::{Days, NaiveDateTime};
 use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
+use story_time_core::contents::Place;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::scaffold::{self, NewBook, NewProject, Step};
 use story_time_core::vault::Measured;
-use story_time_core::{Book, Form, NoteKind, Vault};
+use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
 use crate::output::{Align, Table, bar, percent, plural, signed, thousands, wrap};
 
@@ -63,7 +64,7 @@ pub fn new(
             vault.relative(&vault.ideas_path()).display()
         );
     }
-    println!("\nNext: story-time add chapter \"Chapter title\" -p {slug}");
+    println!("\nNext: story-time add scene \"Scene title\" -p {slug}");
     Ok(())
 }
 
@@ -79,7 +80,7 @@ pub fn new_book(
     println!("Added {} to {}/", created.title(), project.slug);
     print_book(&created, book);
     println!(
-        "\nNext: story-time add chapter \"Chapter title\" -p {} -b {}",
+        "\nNext: story-time add scene \"Scene title\" -p {} -b {}",
         project.slug, created.slug
     );
     Ok(())
@@ -89,15 +90,16 @@ fn print_book(book: &Book, spec: &NewBook) {
     let slug = &book.slug;
     let target = book.target().unwrap_or(spec.form.default_target());
     println!("  books/{slug}/");
-    println!("    {slug}.md       book note: logline, premise, status and target");
+    println!("    {slug}.md       book note: logline, premise, contents, status and target");
     println!(
         "    {slug}-flow.md  story flow: {} for about {} words",
         spec.structure.name,
         thousands(target as i64)
     );
-    println!("    chapters/");
+    println!("    scenes/");
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn add(
     vault: &Vault,
     cwd: &Path,
@@ -105,15 +107,34 @@ pub fn add(
     name: &str,
     project: Option<&str>,
     book: Option<&str>,
+    place: Place,
     now: NaiveDateTime,
 ) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
-    let book = match kind {
-        NoteKind::Chapter => Some(project.find_book(book, cwd)?),
-        _ => None,
+    let note = if kind == NoteKind::Scene {
+        let book = project.find_book(book, cwd)?;
+        let note = scaffold::add_scene(vault, &project, &book, name, place, now.date())?;
+        println!("Created {}", vault.relative(&note.path).display());
+        let title = book.title();
+        match place {
+            Place::Unplaced => println!("It is unplaced: {title}'s contents don't list it yet."),
+            Place::End => {
+                println!("Listed at the end of {title}'s contents, as a chapter of its own.")
+            }
+            Place::Chapter(n) => println!(
+                "Listed at the end of chapter {} in {title}'s contents.",
+                n + 1
+            ),
+        }
+        note
+    } else {
+        if place != Place::End {
+            bail!("--chapter and --unplaced are for scenes");
+        }
+        let note = scaffold::add_note(vault, &project, kind, name, now.date())?;
+        println!("Created {}", vault.relative(&note.path).display());
+        note
     };
-    let note = scaffold::add_note(vault, &project, book.as_ref(), kind, name, now.date())?;
-    println!("Created {}", vault.relative(&note.path).display());
     if let Some(other) = note.same_name {
         eprintln!(
             "Note: {} has the same name, so Obsidian links to that name may go to either note.",
@@ -134,7 +155,7 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
         ("World", Align::Left),
         ("Status", Align::Left),
         ("Form", Align::Left),
-        ("Chapters", Align::Right),
+        ("Scenes", Align::Right),
         ("Words", Align::Right),
         ("Target", Align::Right),
         ("Progress", Align::Left),
@@ -142,7 +163,7 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     for Measured {
         project,
         book,
-        chapters,
+        contents,
         words,
     } in &measured
     {
@@ -155,7 +176,7 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
             book.form()
                 .map(|form| form.label().to_string())
                 .unwrap_or_default(),
-            chapters.len().to_string(),
+            contents.scenes().count().to_string(),
             thousands(*words as i64),
             target.map(|t| thousands(t as i64)).unwrap_or_default(),
             target
@@ -223,7 +244,7 @@ fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveD
     let Measured {
         project,
         book,
-        chapters,
+        contents,
         words,
     } = measured;
     let words = *words;
@@ -240,38 +261,64 @@ fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveD
         println!("  {}", details.join(" · "));
     }
     println!();
-    if chapters.is_empty() {
+    if contents.scenes().next().is_none() && contents.chapters().next().is_none() {
         println!(
-            "  No chapters yet. Add one with: story-time add chapter \"Title\" -p {} -b {}",
+            "  No scenes yet. Add one with: story-time add scene \"Title\" -p {} -b {}",
             project.slug, book.slug
         );
     } else {
         let mut table = Table::new(&[
-            ("#", Align::Right),
             ("Chapter", Align::Left),
+            ("Scene", Align::Left),
             ("Status", Align::Left),
             ("POV", Align::Left),
             ("Words", Align::Right),
         ]);
-        for chapter in chapters {
-            table.row(vec![
-                chapter
-                    .number()
-                    .map(|n| format!("{n:02}"))
-                    .unwrap_or_default(),
-                chapter.title(),
-                chapter.status().unwrap_or_default(),
-                chapter.pov().unwrap_or_default(),
-                thousands(chapter.words as i64),
-            ]);
+        let row = |first: String, scene: &Scene| {
+            vec![
+                first,
+                scene.title(),
+                scene.status().unwrap_or_default(),
+                scene.pov().unwrap_or_default(),
+                thousands(scene.words as i64),
+            ]
+        };
+        let blank = || vec![String::new(); 5];
+        for part in &contents.parts {
+            if let Some(title) = &part.title {
+                let mut heading = blank();
+                heading[0] = title.to_uppercase();
+                table.row(heading);
+            }
+            for chapter in &part.chapters {
+                if chapter.scenes.is_empty() {
+                    let mut empty = blank();
+                    empty[0] = chapter.heading();
+                    empty[1] = "(no scenes yet)".to_string();
+                    table.row(empty);
+                }
+                for (i, scene) in chapter.scenes.iter().enumerate() {
+                    let first = if i == 0 {
+                        chapter.heading()
+                    } else {
+                        String::new()
+                    };
+                    table.row(row(first, scene));
+                }
+            }
         }
-        table.row(vec![
-            String::new(),
-            "Total".to_string(),
-            String::new(),
-            String::new(),
-            thousands(words as i64),
-        ]);
+        for (i, scene) in contents.unplaced.iter().enumerate() {
+            let first = if i == 0 {
+                "Unplaced".to_string()
+            } else {
+                String::new()
+            };
+            table.row(row(first, scene));
+        }
+        let mut total = blank();
+        total[1] = "Total".to_string();
+        total[4] = thousands(words as i64);
+        table.row(total);
         table.print(2);
     }
     println!();
@@ -303,19 +350,27 @@ fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveD
             }
         }
     }
-    if words > 0 {
-        let form = Form::for_length(words);
+    let placed = contents.placed_words();
+    if placed > 0 {
+        let form = Form::for_length(placed);
         println!(
             "  Length       {} territory ({})",
             form.label(),
             form.range()
         );
-        let pages = words.div_ceil(vault.config.words_per_page.max(1));
-        let minutes = words.div_ceil(vault.config.reading_wpm.max(1));
+        let pages = placed.div_ceil(vault.config.words_per_page.max(1));
+        let minutes = placed.div_ceil(vault.config.reading_wpm.max(1));
         println!(
             "  Manuscript   about {} · {} to read",
             plural(pages, "page", "pages"),
             duration(minutes)
+        );
+    }
+    if !contents.unplaced.is_empty() {
+        println!(
+            "  Unplaced     {} · {}, not in the manuscript",
+            plural(contents.unplaced.len() as u64, "scene", "scenes"),
+            plural(words - placed, "word", "words")
         );
     }
     println!(
@@ -327,35 +382,55 @@ fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveD
 pub fn outline(vault: &Vault, cwd: &Path, project: Option<&str>, book: Option<&str>) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
     let book = project.find_book(book, cwd)?;
-    let chapters = book.chapters()?;
+    let contents = book.contents()?;
     println!("\n  {}: outline\n", book.title());
-    if chapters.is_empty() {
-        println!("  No chapters yet.");
+    if contents.scenes().next().is_none() && contents.chapters().next().is_none() {
+        println!("  No scenes yet.");
         return Ok(());
     }
-    for chapter in &chapters {
-        let number = chapter
-            .number()
-            .map(|n| format!("{n:02}  "))
-            .unwrap_or_default();
-        let facts: Vec<String> = [
-            chapter.status(),
-            chapter.pov(),
-            Some(plural(chapter.words as u64, "word", "words")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        println!("  {number}{}  [{}]", chapter.title(), facts.join(" · "));
-        let synopsis = chapter
-            .synopsis()
-            .unwrap_or_else(|| "(no synopsis yet)".to_string());
-        for line in wrap(&synopsis, 72) {
-            println!("  {}{line}", " ".repeat(number.len()));
+    for part in &contents.parts {
+        if let Some(title) = &part.title {
+            println!("  {}\n", title.to_uppercase());
+        }
+        for chapter in &part.chapters {
+            println!("  {}", chapter.heading());
+            if chapter.scenes.is_empty() {
+                println!("    (no scenes yet)");
+            }
+            for scene in &chapter.scenes {
+                print_scene(scene);
+            }
+            println!();
+        }
+    }
+    if !contents.unplaced.is_empty() {
+        println!("  Unplaced (not in the contents)");
+        for scene in &contents.unplaced {
+            print_scene(scene);
         }
         println!();
     }
     Ok(())
+}
+
+fn print_scene(scene: &Scene) {
+    let facts: Vec<String> = [
+        scene.status(),
+        scene.pov(),
+        scene.location(),
+        scene.when(),
+        Some(plural(scene.words as u64, "word", "words")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    println!("    {}  [{}]", scene.title(), facts.join(" · "));
+    let synopsis = scene
+        .synopsis()
+        .unwrap_or_else(|| "(no synopsis yet)".to_string());
+    for line in wrap(&synopsis, 70) {
+        println!("      {line}");
+    }
 }
 
 pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
@@ -501,9 +576,21 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         table.print(4);
         println!();
     }
+    if !report.broken_entries.is_empty() {
+        println!("  In a list of books or a book's contents, but not one of its books or scenes:");
+        let mut table = Table::new(&[("Entry", Align::Left), ("Listed in", Align::Left)]);
+        for (target, sources) in &report.broken_entries {
+            table.row(vec![
+                target.clone(),
+                sources.iter().cloned().collect::<Vec<_>>().join(", "),
+            ]);
+        }
+        table.print(4);
+        println!();
+    }
     if !report.not_on_page.is_empty() {
         println!(
-            "  Documented, but not on the page yet (no chapter mentions the name, title or an alias):"
+            "  Documented, but not on the page yet (no scene mentions the name, title or an alias):"
         );
         let mut table = Table::new(&[("Kind", Align::Left), ("Note", Align::Left)]);
         for (kind, name) in &report.not_on_page {
@@ -533,13 +620,17 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         table.print(4);
         println!();
     }
-    for (label, chapters) in [
-        ("Chapters without a status", &report.without_status),
-        ("Chapters without a synopsis", &report.without_synopsis),
-        ("Empty chapters", &report.empty_chapters),
+    for (label, scenes) in [
+        (
+            "Listed more than once in the contents (only the first counts)",
+            &report.repeated,
+        ),
+        ("Scenes without a status", &report.without_status),
+        ("Scenes without a synopsis", &report.without_synopsis),
+        ("Empty scenes", &report.empty_scenes),
     ] {
-        if !chapters.is_empty() {
-            println!("  {label}: {}", chapters.join(", "));
+        if !scenes.is_empty() {
+            println!("  {label}: {}", scenes.join(", "));
         }
     }
     if !report.unreadable_frontmatter.is_empty() {
@@ -562,8 +653,11 @@ pub fn compile(
     let project = vault.find_project(project, cwd)?;
     let book = project.find_book(book, cwd)?;
     let manuscript = compile::manuscript(&book, vault.config.author.as_deref())?;
-    if manuscript.chapters == 0 {
-        bail!("{} has no chapters with words in them yet", book.title());
+    if manuscript.scenes == 0 {
+        bail!(
+            "{} has no scenes with words in them in its contents yet",
+            book.title()
+        );
     }
     let out = output.unwrap_or_else(|| {
         vault
@@ -573,8 +667,9 @@ pub fn compile(
     });
     compile::export(&manuscript.markdown, &out, format)?;
     println!(
-        "Compiled {} ({}) into {}",
+        "Compiled {} ({}, {}) into {}",
         plural(manuscript.chapters as u64, "chapter", "chapters"),
+        plural(manuscript.scenes as u64, "scene", "scenes"),
         plural(manuscript.words as u64, "word", "words"),
         out.display()
     );

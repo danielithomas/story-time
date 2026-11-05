@@ -34,9 +34,9 @@ pub const FLOW: Template = Template {
     file_name: "story-flow.md",
     default: include_str!("../templates/story-flow.md"),
 };
-pub const CHAPTER: Template = Template {
-    file_name: "chapter.md",
-    default: include_str!("../templates/chapter.md"),
+pub const SCENE: Template = Template {
+    file_name: "scene.md",
+    default: include_str!("../templates/scene.md"),
 };
 pub const CHARACTER: Template = Template {
     file_name: "character.md",
@@ -52,12 +52,12 @@ pub const WORLD: Template = Template {
 };
 
 pub const ALL: [&Template; 7] = [
-    &PROJECT, &BOOK, &FLOW, &CHAPTER, &CHARACTER, &LOCATION, &WORLD,
+    &PROJECT, &BOOK, &FLOW, &SCENE, &CHARACTER, &LOCATION, &WORLD,
 ];
 
 pub fn for_kind(kind: NoteKind) -> &'static Template {
     match kind {
-        NoteKind::Chapter => &CHAPTER,
+        NoteKind::Scene => &SCENE,
         NoteKind::Character => &CHARACTER,
         NoteKind::Location => &LOCATION,
         NoteKind::World => &WORLD,

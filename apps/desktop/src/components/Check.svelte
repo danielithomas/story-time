@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "../lib/api";
   import { addNote, allNotes, app, openNote, toastError } from "../lib/store.svelte";
-  import type { AddableKind, CheckReport } from "../lib/types";
+  import type { BibleKind, CheckReport } from "../lib/types";
 
   let report = $state<CheckReport | null>(null);
 
@@ -24,7 +24,7 @@
     return app.tree ? allNotes(app.tree).find((note) => note.name === name) : undefined;
   }
 
-  async function create(kind: AddableKind, name: string) {
+  async function create(kind: BibleKind, name: string) {
     await addNote(kind, name);
     await run();
   }
@@ -34,12 +34,14 @@
       !report.undocumented.length &&
       !report.ambiguousLinks.length &&
       !report.aliasLinks.length &&
+      !report.brokenEntries.length &&
+      !report.repeated.length &&
       !report.notOnPage.length &&
       !report.misnamed.length &&
       !report.drifted.length &&
       !report.withoutStatus.length &&
       !report.withoutSynopsis.length &&
-      !report.emptyChapters.length &&
+      !report.emptyScenes.length &&
       !report.unreadable.length,
   );
 </script>
@@ -55,7 +57,7 @@
 <div class="view">
   <header>
     <h1>World bible check</h1>
-    <p class="muted">Gaps between what this world's chapters mention and what its notes document.</p>
+    <p class="muted">Gaps between what this world's scenes mention and what its notes document, and contents that don't match the scenes.</p>
     <button class="btn" onclick={run}>Check again</button>
   </header>
 
@@ -95,6 +97,11 @@
         about: "They name a note by its name rather than its file name. Story Time follows them; Obsidian doesn't.",
         items: report.aliasLinks,
       },
+      {
+        title: "Listed, but not a book or scene here",
+        about: "Entries in a world's list of books or a book's contents that don't link to one of its books or scenes.",
+        items: report.brokenEntries,
+      },
     ] as group (group.title)}
       {#if group.items.length}
         <section>
@@ -115,7 +122,7 @@
     {#if report.notOnPage.length}
       <section>
         <h2>Documented, but not on the page yet</h2>
-        <p class="muted">No chapter mentions the name, title or any alias.</p>
+        <p class="muted">No scene mentions the name, title or any alias.</p>
         <ul>
           {#each report.notOnPage as item (item.name)}
             <li><span class="kind">{item.kind}</span> {@render links([item.name])}</li>
@@ -125,9 +132,10 @@
     {/if}
 
     {#each [
-      { title: "Chapters without a status", names: report.withoutStatus },
-      { title: "Chapters without a synopsis", names: report.withoutSynopsis },
-      { title: "Empty chapters", names: report.emptyChapters },
+      { title: "Listed more than once in the contents", names: report.repeated },
+      { title: "Scenes without a status", names: report.withoutStatus },
+      { title: "Scenes without a synopsis", names: report.withoutSynopsis },
+      { title: "Empty scenes", names: report.emptyScenes },
     ] as group (group.title)}
       {#if group.names.length}
         <section>

@@ -1,4 +1,4 @@
-//! Stitching a book's chapters into one manuscript, and exporting it with pandoc.
+//! Stitching a book's scenes into one manuscript, and exporting it with pandoc.
 
 use std::fs;
 use std::io::{self, Write};
@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 
-use crate::project::Book;
+use crate::project::{Book, Scene};
 use crate::text::yaml_escape;
 use crate::words::prose;
 
@@ -62,39 +62,74 @@ impl Format {
 pub struct Manuscript {
     pub markdown: String,
     pub chapters: usize,
+    pub scenes: usize,
     pub words: usize,
-    /// Chapters left out because they have no words yet.
+    /// Placed scenes left out because they have no words yet.
     pub skipped: Vec<String>,
 }
 
-/// The chapters in order, each under a level-one heading, with notes-to-self removed.
+/// The scene break between the scenes of a chapter.
+const SCENE_BREAK: &str = "***";
+
+/// The placed scenes in the order the contents list them, with notes-to-self removed: a heading
+/// for each part and chapter, and a scene break between the scenes of a chapter. Unplaced scenes,
+/// and scenes with no words yet, are left out.
 pub fn manuscript(book: &Book, author: Option<&str>) -> Result<Manuscript> {
+    let contents = book.contents()?;
     let mut markdown = format!("---\ntitle: \"{}\"\n", yaml_escape(&book.title()));
     if let Some(author) = author {
         markdown.push_str(&format!("author: \"{}\"\n", yaml_escape(author)));
     }
     markdown.push_str("---\n\n");
-    let (mut chapters, mut words, mut skipped) = (0, 0, Vec::new());
-    for chapter in book.chapters()? {
-        if chapter.words == 0 {
-            skipped.push(chapter.note.name.clone());
+    let chapter_heading = if contents.has_parts() { "##" } else { "#" };
+    let (mut chapters, mut scenes, mut words, mut skipped) = (0, 0, 0, Vec::new());
+    for part in &contents.parts {
+        let mut text = String::new();
+        for chapter in &part.chapters {
+            let mut included = Vec::new();
+            for scene in &chapter.scenes {
+                if scene.words == 0 {
+                    skipped.push(scene.note.name.clone());
+                } else {
+                    included.push(scene_text(scene));
+                    words += scene.words;
+                }
+            }
+            if included.is_empty() {
+                continue;
+            }
+            text.push_str(&format!("{chapter_heading} {}\n\n", chapter.heading()));
+            text.push_str(&included.join(&format!("\n{SCENE_BREAK}\n\n")));
+            text.push('\n');
+            chapters += 1;
+            scenes += included.len();
+        }
+        if text.is_empty() {
             continue;
         }
-        let text = paragraphs(prose(&chapter.note.body).trim());
-        if !text.starts_with("# ") {
-            markdown.push_str(&format!("# {}\n\n", chapter.title()));
+        if let Some(title) = &part.title {
+            markdown.push_str(&format!("# {title}\n\n"));
         }
         markdown.push_str(&text);
-        markdown.push('\n');
-        chapters += 1;
-        words += chapter.words;
     }
     Ok(Manuscript {
-        markdown,
+        markdown: format!("{}\n", markdown.trim_end()),
         chapters,
+        scenes,
         words,
         skipped,
     })
+}
+
+/// A scene's prose, without the title heading its note opens with: the contents give the
+/// manuscript its headings.
+fn scene_text(scene: &Scene) -> String {
+    let text = prose(&scene.note.body);
+    let mut lines = text.trim().lines().peekable();
+    if lines.peek().is_some_and(|line| line.starts_with("# ")) {
+        lines.next();
+    }
+    paragraphs(lines.collect::<Vec<_>>().join("\n").trim())
 }
 
 static STRUCTURAL: LazyLock<Regex> =
@@ -169,6 +204,14 @@ pub fn export(markdown: &str, out: &Path, format: Format) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Vault;
+    use crate::contents::Place;
+    use crate::note::set_section;
+    use crate::project::Form;
+    use crate::scaffold::{NewBook, NewProject, add_scene, create_project};
+    use crate::structures::FREEFORM;
+    use chrono::NaiveDate;
+    use tempfile::TempDir;
 
     #[test]
     fn separates_prose_lines_only() {
@@ -176,6 +219,65 @@ mod tests {
         assert_eq!(
             paragraphs(text),
             "First line.\n\nSecond line.\n\n- item one\n- item two\n> quoted\n> more\n*Italic opening.*\n\nNext.\n\n***\n\nAfter the break.\n"
+        );
+    }
+
+    #[test]
+    fn follows_the_contents() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(".obsidian")).unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 6).unwrap();
+        let spec = NewProject {
+            world: None,
+            book: NewBook {
+                title: "Sample Story",
+                form: Form::ShortStory,
+                target: None,
+                structure: &FREEFORM,
+                premise: None,
+            },
+        };
+        let (project, book) = create_project(&vault, &spec, today).unwrap();
+        for (name, place) in [
+            ("Arrival", Place::End),
+            ("First Light", Place::Chapter(0)),
+            ("Empty", Place::Chapter(0)),
+            ("Night", Place::End),
+            ("Aside", Place::Unplaced),
+        ] {
+            let book = Book::load(&book.dir, &project.slug).unwrap().unwrap();
+            add_scene(&vault, &project, &book, name, place, today).unwrap();
+        }
+        for (name, text) in [
+            ("arrival", "# Arrival\n\nShe landed.\nIt rained."),
+            ("first-light", "Dawn came. %% too short? %%"),
+            ("night", "Dark."),
+            ("aside", "Not in the book."),
+        ] {
+            fs::write(
+                book.scenes_dir().join(format!("{name}.md")),
+                format!("---\nstatus: draft\n---\n{text}\n"),
+            )
+            .unwrap();
+        }
+        let book = Book::load(&book.dir, &project.slug).unwrap().unwrap();
+        let built = manuscript(&book, Some("A. Writer")).unwrap();
+        assert_eq!(
+            built.markdown,
+            "---\ntitle: \"Sample Story\"\nauthor: \"A. Writer\"\n---\n\n# Chapter 1\n\nShe landed.\n\nIt rained.\n\n***\n\nDawn came.\n\n# Chapter 2\n\nDark.\n"
+        );
+        assert_eq!((built.chapters, built.scenes, built.words), (2, 3, 7));
+        assert_eq!(built.skipped, ["empty"]);
+
+        let content = fs::read_to_string(&book.note.path).unwrap();
+        let parts = "### Part One\n\n- The Landing\n  - [[arrival|Arrival]]\n- [[first-light]]\n\n### Part Two\n\n- [[night]]";
+        let lines: Vec<String> = parts.lines().map(String::from).collect();
+        fs::write(&book.note.path, set_section(&content, "Contents", &lines)).unwrap();
+        let book = Book::load(&book.dir, &project.slug).unwrap().unwrap();
+        assert_eq!(
+            manuscript(&book, None).unwrap().markdown,
+            "---\ntitle: \"Sample Story\"\n---\n\n# Part One\n\n## The Landing\n\nShe landed.\n\nIt rained.\n\n## Chapter 1\n\nDawn came.\n\n# Part Two\n\n## Chapter 2\n\nDark.\n"
         );
     }
 

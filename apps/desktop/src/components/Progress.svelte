@@ -19,7 +19,7 @@
     progress?.book.target ? Math.min(1, progress.book.words / progress.book.target) : 0,
   );
   const scale = $derived(Math.max(progress?.goal ?? 0, ...(progress?.history.map((d) => d.words) ?? [0]), 1));
-  const totalChapters = $derived(progress?.statuses.reduce((sum, s) => sum + s.chapters, 0) ?? 0);
+  const totalScenes = $derived(progress?.statuses.reduce((sum, s) => sum + s.scenes, 0) ?? 0);
 
   const day = (date: string) =>
     new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
@@ -75,12 +75,14 @@
       <div class="tile">
         <span class="label">Length so far</span>
         <strong>{p.lengthLabel ? capitalise(p.lengthLabel) : "—"}</strong>
-        <span class="muted">{p.lengthRange ?? "No words yet"}</span>
+        <span class="muted">{p.lengthRange ?? (p.book.words ? "No placed scenes yet" : "No words yet")}</span>
       </div>
       <div class="tile">
         <span class="label">As a manuscript</span>
         <strong>{plural(p.pages, "page")}</strong>
-        <span class="muted">about {duration(p.readingMinutes)} to read</span>
+        <span class="muted">
+          about {duration(p.readingMinutes)} to read{#if p.book.unplaced}, leaving out {plural(p.book.unplaced, "unplaced scene")}{/if}
+        </span>
       </div>
       <div class="tile">
         <span class="label">World bible</span>
@@ -91,17 +93,17 @@
       </div>
     </section>
 
-    {#if totalChapters > 0}
+    {#if totalScenes > 0}
       <section>
-        <h2>Chapters by status</h2>
+        <h2>Scenes by status</h2>
         <div class="stack">
           {#each p.statuses as s (s.status)}
-            <div class="part" data-status={s.status} style:flex-grow={s.chapters} title="{capitalise(s.status)}: {plural(s.chapters, 'chapter')}"></div>
+            <div class="part" data-status={s.status} style:flex-grow={s.scenes} title="{capitalise(s.status)}: {plural(s.scenes, 'scene')}"></div>
           {/each}
         </div>
         <div class="legend">
           {#each p.statuses as s (s.status)}
-            <span><span class="dot" data-status={s.status}></span>{capitalise(s.status)} {s.chapters} · {formatNumber(s.words)} words</span>
+            <span><span class="dot" data-status={s.status}></span>{capitalise(s.status)} {s.scenes} · {formatNumber(s.words)} words</span>
           {/each}
         </div>
       </section>

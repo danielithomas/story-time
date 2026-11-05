@@ -35,6 +35,7 @@ fn main() {
             commands::create_project,
             commands::create_book,
             commands::add_note,
+            commands::add_scene,
             commands::link_for,
             commands::writing_today,
             commands::record_snapshot,

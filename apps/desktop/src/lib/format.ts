@@ -18,8 +18,6 @@ export function duration(minutes: number) {
   return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
-export const chapterNumber = (n: number | null) => (n == null ? "" : String(n).padStart(2, "0"));
-
 /** "[[Mara Chen|Mara]]" reads as "Mara"; "[[Mara Chen]]" as "Mara Chen". */
 export const plainLinks = (text: string) =>
   text.replace(/\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_, target: string, alias?: string) => alias ?? target);

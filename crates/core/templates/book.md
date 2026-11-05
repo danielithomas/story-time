@@ -19,7 +19,10 @@ tags: []
 
 ## Story map
 
-- {{flow_link}}: the plan of the whole book, with chapters, scenes and beats
-- `chapters/`: the book itself
+- {{flow_link}}: the plan of the whole book, beat by beat
+
+## Contents
+
+%% The book in reading order. A list item that isn't a link is a chapter, with its scenes indented beneath it as links; a link on its own is a chapter by itself. ### headings make parts. %%
 
 ## Notes

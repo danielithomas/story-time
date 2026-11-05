@@ -408,7 +408,7 @@ pub const FREEFORM: Structure = Structure {
     parts: &[Part {
         name: "Timeline",
         span: None,
-        prompt: "Chapters and scenes in story order.",
+        prompt: "Scenes in story order.",
         beats: &[],
     }],
 };
@@ -509,7 +509,7 @@ mod tests {
     fn freeform_has_no_positions() {
         assert_eq!(
             render(&FREEFORM, Some(90_000)),
-            "## Timeline\n\n%% Chapters and scenes in story order. %%\n"
+            "## Timeline\n\n%% Scenes in story order. %%\n"
         );
     }
 }

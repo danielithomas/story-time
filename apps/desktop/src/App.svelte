@@ -37,7 +37,7 @@
       {:else if !app.slug}
         <div class="start">
           <h1>No projects yet</h1>
-          <p class="muted">A project is a folder for one story: its chapters, characters, places and world.</p>
+          <p class="muted">A project is a world: the books set in it, with their scenes, and its characters, places and world notes.</p>
           <div class="actions">
             <button class="btn primary" onclick={() => openNewProject()}>Start a project</button>
             <button class="btn" onclick={() => (app.view = "ideas")}>Start from an idea</button>

@@ -1,20 +1,21 @@
 //! A project is a world: `<slug>/<slug>.md`, its world bible in `bible/`, and one or more books
-//! in `books/<book>/`, each with its own note, story flow and chapters.
+//! in `books/<book>/`, each with its own note, story flow and scenes.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use chrono::NaiveDate;
 
+use crate::contents::{self, Contents, Listing};
 use crate::ids;
 use crate::links::links;
 use crate::note::{Note, section};
-use crate::text::{leading_number, name_from_file, natural_cmp, slugify, strip_leading_number};
+use crate::text::{natural_cmp, slugify};
 use crate::vault::markdown_files;
 use crate::words;
 
-/// Chapter statuses, in the order a chapter moves through them.
-pub const CHAPTER_STATUSES: [&str; 4] = ["outline", "draft", "revised", "final"];
+/// Scene statuses, in the order a scene moves through them.
+pub const SCENE_STATUSES: [&str; 4] = ["outline", "draft", "revised", "final"];
 
 /// Book statuses, in the order a book usually moves through them.
 pub const BOOK_STATUSES: [&str; 7] = [
@@ -39,7 +40,7 @@ pub const RESERVED: [&str; 3] = ["research", "scratchpad", "templates"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteKind {
-    Chapter,
+    Scene,
     Character,
     Location,
     World,
@@ -47,7 +48,7 @@ pub enum NoteKind {
 
 impl NoteKind {
     pub const ALL: [NoteKind; 4] = [
-        NoteKind::Chapter,
+        NoteKind::Scene,
         NoteKind::Character,
         NoteKind::Location,
         NoteKind::World,
@@ -55,7 +56,7 @@ impl NoteKind {
 
     pub fn key(self) -> &'static str {
         match self {
-            NoteKind::Chapter => "chapter",
+            NoteKind::Scene => "scene",
             NoteKind::Character => "character",
             NoteKind::Location => "location",
             NoteKind::World => "world",
@@ -70,7 +71,7 @@ impl NoteKind {
 
     pub fn folder(self) -> &'static str {
         match self {
-            NoteKind::Chapter => "chapters",
+            NoteKind::Scene => "scenes",
             NoteKind::Character => "characters",
             NoteKind::Location => "locations",
             NoteKind::World => "world",
@@ -79,7 +80,7 @@ impl NoteKind {
 
     pub fn describe(self) -> &'static str {
         match self {
-            NoteKind::Chapter => "a numbered chapter in a book's chapters/",
+            NoteKind::Scene => "a scene in a book's scenes/, listed in its contents",
             NoteKind::Character => "a character sheet in bible/characters/",
             NoteKind::Location => "a place in bible/locations/",
             NoteKind::World => "how something in the world works, in bible/world/",
@@ -88,7 +89,7 @@ impl NoteKind {
 
     /// Whether notes of this kind belong to the world bible rather than to a book.
     pub fn is_bible(self) -> bool {
-        self != NoteKind::Chapter
+        self != NoteKind::Scene
     }
 }
 
@@ -227,9 +228,9 @@ impl Project {
         self.dir.join(BOOKS_DIR)
     }
 
-    /// Where world-bible notes of `kind` live. Chapters belong to a book instead.
+    /// Where world-bible notes of `kind` live. Scenes belong to a book instead.
     pub fn folder(&self, kind: NoteKind) -> PathBuf {
-        debug_assert!(kind.is_bible(), "chapters live in a book");
+        debug_assert!(kind.is_bible(), "scenes live in a book");
         self.bible_dir().join(kind.folder())
     }
 
@@ -338,7 +339,8 @@ impl Project {
     }
 }
 
-/// A book: `books/<slug>/<slug>.md`, its story flow `<slug>-flow.md`, and `chapters/`.
+/// A book: `books/<slug>/<slug>.md`, listing its contents, its story flow `<slug>-flow.md`, and
+/// `scenes/`.
 #[derive(Debug, Clone)]
 pub struct Book {
     /// The folder name, which is also the book note's name.
@@ -409,31 +411,38 @@ impl Book {
         self.dir.join(format!("{}-flow.md", self.slug))
     }
 
-    pub fn chapters_dir(&self) -> PathBuf {
-        self.dir.join(NoteKind::Chapter.folder())
+    pub fn scenes_dir(&self) -> PathBuf {
+        self.dir.join(NoteKind::Scene.folder())
     }
 
-    /// Chapters in reading order: by file path, with numbers compared as numbers.
-    pub fn chapters(&self) -> Result<Vec<Chapter>> {
-        let folder = self.chapters_dir();
-        let mut chapters = markdown_files(&folder)?
-            .into_iter()
+    /// Every scene in `scenes/`, placed or not, by name.
+    pub fn scenes(&self) -> Result<Vec<Scene>> {
+        let mut scenes = markdown_files(&self.scenes_dir())?
+            .iter()
             .map(|path| {
-                let note = Note::load(&path)?;
-                let relative = path
-                    .strip_prefix(&folder)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .into_owned();
-                Ok(Chapter {
+                let note = Note::load(path)?;
+                Ok(Scene {
                     words: note.words(),
-                    relative,
                     note,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        chapters.sort_by(|a, b| natural_cmp(&a.relative, &b.relative));
-        Ok(chapters)
+        scenes.sort_by(|a, b| natural_cmp(&a.title(), &b.title()));
+        Ok(scenes)
+    }
+
+    /// The contents as written under `## Contents` in the book note.
+    pub fn listing(&self) -> Listing {
+        Listing::parse(&section(&self.note.body, contents::HEADING).unwrap_or_default())
+    }
+
+    /// The book's scenes in reading order, as its contents list them, and those they don't.
+    pub fn contents(&self) -> Result<Contents> {
+        Ok(Contents::resolve(
+            &self.listing(),
+            &self.dir,
+            self.scenes()?,
+        ))
     }
 }
 
@@ -442,40 +451,44 @@ fn valid_id(note: &Note) -> Option<String> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Chapter {
+pub struct Scene {
     pub note: Note,
-    /// Path within `chapters/`, which sets the reading order.
-    pub relative: String,
     pub words: usize,
 }
 
-impl Chapter {
-    pub fn number(&self) -> Option<u32> {
-        leading_number(&self.note.name)
-    }
-
-    /// The note's name ([`Note::title`]), made from the file name without its number if it has
-    /// none of its own.
+impl Scene {
     pub fn title(&self) -> String {
-        self.note
-            .given_name()
-            .or_else(|| self.note.heading())
-            .unwrap_or_else(|| name_from_file(strip_leading_number(&self.note.name)))
+        self.note.title()
     }
 
     pub fn status(&self) -> Option<String> {
         self.note.frontmatter.str("status")
     }
 
+    /// The point-of-view character, as plain text.
     pub fn pov(&self) -> Option<String> {
-        self.note
-            .frontmatter
-            .str("pov")
-            .map(|pov| words::plain_text(&pov))
+        self.plain("pov")
+    }
+
+    /// Where the scene happens, as plain text.
+    pub fn location(&self) -> Option<String> {
+        self.plain("location")
+    }
+
+    /// When the scene happens in story time, as written.
+    pub fn when(&self) -> Option<String> {
+        self.note.frontmatter.str("when")
     }
 
     pub fn synopsis(&self) -> Option<String> {
         self.note.frontmatter.str("synopsis")
+    }
+
+    fn plain(&self, key: &str) -> Option<String> {
+        self.note
+            .frontmatter
+            .str(key)
+            .map(|value| words::plain_text(&value))
     }
 }
 

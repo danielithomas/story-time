@@ -3,8 +3,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AddableKind,
   AddedNote,
+  BibleKind,
   BookProgress,
   CheckReport,
   Choices,
@@ -16,6 +16,7 @@ import type {
   ProjectTree,
   PropertyValue,
   SaveResult,
+  ScenePlace,
   TodayInfo,
   VaultInfo,
 } from "./types";
@@ -45,8 +46,15 @@ export const api = {
   }) => invoke<CreatedBook>("create_project", args),
   createBook: (args: { slug: string; title: string; form: string; target: number | null; structure: string }) =>
     invoke<CreatedBook>("create_book", args),
-  addNote: (slug: string, book: string | null, kind: AddableKind, name: string) =>
-    invoke<AddedNote>("add_note", { slug, book, kind, name }),
+  addNote: (slug: string, kind: BibleKind, name: string) => invoke<AddedNote>("add_note", { slug, kind, name }),
+  addScene: (slug: string, book: string | null, name: string, place: ScenePlace) =>
+    invoke<AddedNote>("add_scene", {
+      slug,
+      book,
+      name,
+      chapter: typeof place === "object" ? place.chapter : null,
+      unplaced: place === "unplaced",
+    }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),
   writingToday: () => invoke<TodayInfo>("writing_today"),
   recordSnapshot: () => invoke<void>("record_snapshot"),

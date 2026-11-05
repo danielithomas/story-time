@@ -11,13 +11,15 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "./api";
 import { formatNumber, plural } from "./format";
 import type {
-  AddableKind,
+  BibleKind,
   Choices,
   NoteDoc,
   NoteRef,
   ProjectSummary,
   ProjectTree,
   PropertyValue,
+  SceneRef,
+  ScenePlace,
   TodayInfo,
   VaultInfo,
 } from "./types";
@@ -168,11 +170,18 @@ export function allNotes(tree: ProjectTree): NoteRef[] {
   const book = tree.book;
   return [
     tree.projectNote,
-    ...(book ? [book.note, ...(book.flowNote ? [book.flowNote] : []), ...book.chapters] : []),
+    ...(book ? [book.note, ...(book.flowNote ? [book.flowNote] : []), ...bookScenes(tree)] : []),
     ...tree.characters,
     ...tree.locations,
     ...tree.world,
   ];
+}
+
+/** Every scene in the open book: those in its contents, in order, then the unplaced. */
+export function bookScenes(tree: ProjectTree | null): SceneRef[] {
+  const book = tree?.book;
+  if (!book) return [];
+  return [...book.parts.flatMap((part) => part.chapters.flatMap((chapter) => chapter.scenes)), ...book.unplaced];
 }
 
 /** A link to a note, written so that both Story Time and Obsidian follow it. */
@@ -251,14 +260,28 @@ export async function createBook(args: { title: string; form: string; target: nu
   toast(`Added ${created.title}.`);
 }
 
-export async function addNote(kind: AddableKind, name: string) {
+export async function addNote(kind: BibleKind, name: string) {
   if (!app.slug) return;
+  const slug = app.slug;
+  await added(() => api.addNote(slug, kind, name));
+}
+
+/** Adds a scene to the open book. Story Time lists it in the book's contents unless it is unplaced. */
+export async function addScene(name: string, place: ScenePlace) {
+  if (!app.slug) return;
+  const [slug, book] = [app.slug, app.book];
+  await added(() => api.addScene(slug, book, name, place));
+}
+
+async function added(add: () => Promise<{ path: string; name: string; sameName: string | null }>) {
+  // Adding a scene rewrites the book note's contents, so any edits to it are saved first.
+  if (!app.slug || !(await settle())) return;
   try {
-    const added = await api.addNote(app.slug, app.book, kind, name);
+    const note = await add();
     app.tree = await api.projectTree(app.slug, app.book);
-    await openNote(added.path);
-    if (added.sameName) {
-      toast(`${added.sameName} has the same name, so links to "${added.name}" may go to either note.`);
+    await openNote(note.path);
+    if (note.sameName) {
+      toast(`${note.sameName} has the same name, so links to "${note.name}" may go to either note.`);
     }
   } catch (error) {
     toastError(error);
@@ -410,8 +433,9 @@ export async function compile(format: string) {
   if (!app.slug || !(await settle())) return;
   try {
     const result = await api.compileBook(app.slug, app.book, format);
-    const skipped = result.skipped.length ? ` Left out ${plural(result.skipped.length, "empty chapter")}.` : "";
-    toast(`Exported ${plural(result.chapters, "chapter")}, ${formatNumber(result.words)} words.${skipped}`, {
+    const skipped = result.skipped.length ? ` Left out ${plural(result.skipped.length, "empty scene")}.` : "";
+    const size = `${plural(result.chapters, "chapter")}, ${plural(result.scenes, "scene")}, ${formatNumber(result.words)} words`;
+    toast(`Exported ${size}.${skipped}`, {
       label: "Show file",
       run: () => void revealItemInDir(result.path),
     });

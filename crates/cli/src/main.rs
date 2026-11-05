@@ -12,6 +12,7 @@ use chrono::Local;
 use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{Parser, Subcommand};
 use story_time_core::compile::Format;
+use story_time_core::contents::Place;
 use story_time_core::scaffold::NewBook;
 use story_time_core::structures::STRUCTURES;
 use story_time_core::{Form, NoteKind, Vault};
@@ -66,22 +67,30 @@ enum Command {
         #[arg(long, value_name = "IDEA", conflicts_with = "in_project")]
         from_idea: Option<Option<String>>,
     },
-    /// Add a chapter to a book, or a character, location or world note to a project's world bible.
+    /// Add a scene to a book, or a character, location or world note to a project's world bible.
     Add {
         #[arg(value_parser = kind_values())]
         kind: String,
-        /// The note's name. Chapters are numbered automatically.
+        /// The note's name.
         name: String,
         /// Project slug or title (default: the project you are in, or the only one).
         #[arg(short, long)]
         project: Option<String>,
-        /// For a chapter, the book (default: the book you are in, or the project's only one).
+        /// For a scene, the book (default: the book you are in, or the project's only one).
         #[arg(short, long)]
         book: Option<String>,
+        /// Add the scene to the end of this chapter in the book's contents, counting from 1.
+        /// Without it, the scene goes at the end of the contents as a chapter of its own.
+        #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+        chapter: Option<u32>,
+        /// Leave the scene out of the book's contents, to place it later.
+        #[arg(long, conflicts_with = "chapter")]
+        unplaced: bool,
     },
-    /// Word counts and progress for every book, or chapter by chapter for one project's books.
+    /// Word counts and progress for every book, or scene by scene for one project's books.
     Stats { project: Option<String> },
-    /// Each chapter's status, point of view and synopsis, in order: a corkboard for the terminal.
+    /// Each scene's status, point of view and synopsis, chapter by chapter: a corkboard for the
+    /// terminal.
     Outline {
         project: Option<String>,
         /// The book (default: the book you are in, or the project's only one).
@@ -107,9 +116,9 @@ enum Command {
         non_fiction: bool,
     },
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
-    /// page, and chapters missing a status or synopsis.
+    /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
     Check { project: Option<String> },
-    /// Stitch a book's chapters into one manuscript.
+    /// Stitch the scenes a book's contents list into one manuscript.
     Compile {
         project: Option<String>,
         /// The book (default: the book you are in, or the project's only one).
@@ -201,8 +210,15 @@ fn run(cli: Cli) -> Result<()> {
             name,
             project,
             book,
+            chapter,
+            unplaced,
         } => {
             let kind = NoteKind::from_key(&kind).expect("validated kind");
+            let place = match (chapter, unplaced) {
+                (_, true) => Place::Unplaced,
+                (Some(n), _) => Place::Chapter(n as usize - 1),
+                (None, false) => Place::End,
+            };
             commands::add(
                 &vault,
                 &cwd,
@@ -210,6 +226,7 @@ fn run(cli: Cli) -> Result<()> {
                 &name,
                 project.as_deref(),
                 book.as_deref(),
+                place,
                 now,
             )
         }

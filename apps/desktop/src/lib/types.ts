@@ -16,7 +16,7 @@ export interface Choices {
   forms: Choice[];
   structures: Choice[];
   formats: Choice[];
-  chapterStatuses: string[];
+  sceneStatuses: string[];
   bookStatuses: string[];
 }
 
@@ -36,8 +36,11 @@ export interface BookSummary {
   formLabel: string | null;
   target: number | null;
   deadline: string | null;
+  /** Words in all the book's scenes, placed or not. */
   words: number;
+  scenes: number;
   chapters: number;
+  unplaced: number;
 }
 
 export interface CreatedBook {
@@ -56,12 +59,28 @@ export interface AddedNote extends NoteRef {
   sameName: string | null;
 }
 
-export interface ChapterRef extends NoteRef {
-  number: number | null;
+export interface SceneRef extends NoteRef {
   status: string | null;
   pov: string | null;
+  location: string | null;
+  when: string | null;
   synopsis: string | null;
   words: number;
+}
+
+export interface ChapterRef {
+  /** Its position in the book, counting from 0 across parts. */
+  index: number;
+  /** Its title, or "Chapter 3". */
+  heading: string;
+  title: string | null;
+  scenes: SceneRef[];
+  words: number;
+}
+
+export interface PartRef {
+  title: string | null;
+  chapters: ChapterRef[];
 }
 
 /** A project's notes, with one of its books open. */
@@ -74,16 +93,19 @@ export interface ProjectTree {
   world: NoteRef[];
 }
 
+/** A book's notes, with its scenes as its contents list them. */
 export interface BookTree {
   summary: BookSummary;
   note: NoteRef;
   flowNote: NoteRef | null;
-  chapters: ChapterRef[];
+  hasParts: boolean;
+  parts: PartRef[];
+  unplaced: SceneRef[];
 }
 
 export type PropertyValue = string | string[];
 
-export type NoteKind = "project" | "book" | "flow" | "chapter" | "character" | "location" | "world" | "note";
+export type NoteKind = "project" | "book" | "flow" | "scene" | "character" | "location" | "world" | "note";
 
 export interface NoteDoc {
   path: string;
@@ -112,6 +134,8 @@ export interface TodayInfo {
 
 export interface BookProgress {
   book: BookSummary;
+  /** Words in the placed scenes: the manuscript. */
+  placedWords: number;
   worldTitle: string;
   genre: string[];
   lengthLabel: string | null;
@@ -122,7 +146,7 @@ export interface BookProgress {
   wordsPerDay: number | null;
   today: number;
   goal: number;
-  statuses: { status: string; chapters: number; words: number }[];
+  statuses: { status: string; scenes: number; words: number }[];
   characters: number;
   locations: number;
   world: number;
@@ -133,18 +157,21 @@ export interface CheckReport {
   undocumented: { name: string; sources: string[] }[];
   ambiguousLinks: { name: string; sources: string[] }[];
   aliasLinks: { name: string; sources: string[] }[];
+  brokenEntries: { name: string; sources: string[] }[];
+  repeated: string[];
   notOnPage: { kind: string; name: string }[];
   misnamed: { path: string; to: string }[];
   drifted: { path: string; to: string }[];
   withoutStatus: string[];
   withoutSynopsis: string[];
-  emptyChapters: string[];
+  emptyScenes: string[];
   unreadable: { path: string; error: string }[];
 }
 
 export interface CompileResult {
   path: string;
   chapters: number;
+  scenes: number;
   words: number;
   skipped: string[];
 }
@@ -156,5 +183,8 @@ export interface Idea {
   project: string | null;
 }
 
-/** Note kinds that can be added to a project. */
-export type AddableKind = "chapter" | "character" | "location" | "world";
+/** Kinds of world-bible note that can be added to a project. */
+export type BibleKind = "character" | "location" | "world";
+
+/** Where a new scene goes: at the end of a chapter (by index), at the end of the contents as a chapter of its own, or unplaced. */
+export type ScenePlace = { chapter: number } | "end" | "unplaced";

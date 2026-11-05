@@ -214,7 +214,7 @@ impl LinkIndex {
 }
 
 /// Removes `.` and `..` from a path without touching the filesystem.
-fn normalise(path: &Path) -> PathBuf {
+pub(crate) fn normalise(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {

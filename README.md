@@ -23,7 +23,7 @@ Needs Rust 1.90 or later. [pandoc](https://pandoc.org) is optional; it is used o
 cd ~/stories
 story-time init                                   # config, templates, Obsidian template folder
 story-time new "Sample Story" --from-idea         # a project (a world) with its first book; premise from the ideas file
-story-time add chapter "Arrival"                  # books/sample-story/chapters/01-arrival.md
+story-time add scene "Arrival"                    # books/sample-story/scenes/arrival.md, listed in the book's contents
 story-time add character "Mara Chen"              # bible/characters/mara-chen.md
 story-time new "Second Story" --in sample-story   # another book in the same world
 story-time stats                                  # every book at a glance
@@ -45,22 +45,22 @@ Option 4 makes every command work from any directory, which helps if the vault m
 | Command | What it does |
 |---|---|
 | `init [--force]` | Writes `.story-time/config.toml`, the note templates in `templates/`, `.obsidian/templates.json` (pointing Obsidian's Templates plugin at that folder) and, in a git repository, a `.gitignore` entry for compiled output and a `.gitattributes` entry so git merges the writing log from two machines instead of reporting a conflict. Existing files are kept; `--force` replaces only the templates. |
-| `new "Title" [--world W \| --in PROJECT] [--form F] [--target N] [--structure S] [--from-idea [NAME]]` | Starts a book. On its own, creates a project: the world, with its project note and world bible (`bible/characters/`, `bible/locations/`, `bible/world/`), and the book in `books/<slug>/` with its book note, story flow and `chapters/`. The world takes the book's title unless `--world` names it; when the two would share a folder name, the project's gets `-world` (`sample-story-world/`). `--in` adds the book to an existing project instead. `--structure` lays out the flow note with beats and the word count each lands at (`three-act`, `save-the-cat`, `heros-journey`, `story-circle`, `kishotenketsu`, `freeform`). `--from-idea` copies the premise from the ideas file and appends `→ [[slug]]` to that idea. Nothing in the ideas file is removed or reworded. |
-| `add chapter\|character\|location\|world "Name" [-p project] [-b book]` | Creates a note from its template: a chapter in a book, or a character, location or world note in the project's world bible. It is named with the kebab-case form of the name, with the name itself as its first alias. Chapters are numbered after the highest existing number. |
-| `stats [project]` | All books: world, status, form, chapters, words, progress to target. One project: for each of its books, a chapter table, progress, deadline pacing, length category, manuscript pages and reading time, and words today; then the size of its world bible. |
-| `outline [project] [-b book]` | Each chapter's status, POV, word count and synopsis, in order: a corkboard for the terminal. |
+| `new "Title" [--world W \| --in PROJECT] [--form F] [--target N] [--structure S] [--from-idea [NAME]]` | Starts a book. On its own, creates a project: the world, with its project note and world bible (`bible/characters/`, `bible/locations/`, `bible/world/`), and the book in `books/<slug>/` with its book note, story flow and `scenes/`. The world takes the book's title unless `--world` names it; when the two would share a folder name, the project's gets `-world` (`sample-story-world/`). `--in` adds the book to an existing project instead. `--structure` lays out the flow note with beats and the word count each lands at (`three-act`, `save-the-cat`, `heros-journey`, `story-circle`, `kishotenketsu`, `freeform`). `--from-idea` copies the premise from the ideas file and appends `→ [[slug]]` to that idea. Nothing in the ideas file is removed or reworded. |
+| `add scene\|character\|location\|world "Name" [-p project] [-b book] [--chapter N \| --unplaced]` | Creates a note from its template: a scene in a book, or a character, location or world note in the project's world bible. It is named with the kebab-case form of the name, with the name itself as its first alias. A new scene is listed at the end of the book's contents as a chapter of its own; `--chapter N` adds it to the end of chapter N instead, and `--unplaced` leaves it out of the contents. |
+| `stats [project]` | All books: world, status, form, scenes, words, progress to target. One project: for each of its books, its scenes chapter by chapter, progress, deadline pacing, length category, manuscript pages and reading time, and words today; then the size of its world bible. |
+| `outline [project] [-b book]` | Each scene's status, POV, location, time, word count and synopsis, chapter by chapter, then the unplaced scenes: a corkboard for the terminal. |
 | `today` | Words written today against the daily goal, per book, plus your streak. |
 | `history [--days N]` | Words written per day. |
 | `snapshot` | Records word counts silently, for a cron job or git hook. |
 | `idea Name: description [--non-fiction]` | Appends an idea under `### Fiction` (or `### Non-Fiction`) in the ideas file, in the list style already there. |
-| `check [project]` | World-bible gaps across all of a project's books: links to notes that don't exist yet, character, location and world notes whose name never appears in a chapter, and chapters missing a status or synopsis. Also links Obsidian can't follow to a single note, and file names that aren't kebab-case or no longer match the note's name. |
-| `compile [project] [-b book] [--format md\|docx\|epub\|html\|pdf] [-o path]` | A book's chapters in order as one manuscript, minus notes-to-self. Defaults to `.story-time/build/<project>/<book>.<format>`. |
+| `check [project]` | World-bible gaps across all of a project's books: links to notes that don't exist yet, character, location and world notes whose name never appears in a scene, and scenes missing a status or synopsis. Also entries in `## Books` or `## Contents` that aren't a book or scene there, scenes listed twice, links Obsidian can't follow to a single note, and file names that aren't kebab-case or no longer match the note's name. |
+| `compile [project] [-b book] [--format md\|docx\|epub\|html\|pdf] [-o path]` | The scenes a book's contents list, in order, as one manuscript minus notes-to-self: a heading for each part and chapter, and `***` between scenes. Unplaced scenes are left out. Defaults to `.story-time/build/<project>/<book>.<format>`. |
 
 Without a project argument, commands other than `stats` use the project folder you are in, or the only project in the vault. Otherwise give its slug, title, or an unambiguous part of either (`stats sample`). Books work the same way with `-b`: the book folder you are in, else the project's only book.
 
 ## Conventions
 
-**Projects and books.** A project is a world: a folder at the vault root holding a note with the same name and `type: project`, such as `sample-world/sample-world.md`. Its world bible sits in `bible/` (`characters/`, `locations/`, `world/`) and is shared by every book set in it. Each book is a folder in `books/` with a note of the same name, a story flow (`<book>-flow.md`) and `chapters/`. The project note lists its books in order under `## Books`; story-time adds each new book there. `research`, `scratchpad` and `templates` are never projects. `docs/vault-format.md` describes the full layout.
+**Projects and books.** A project is a world: a folder at the vault root holding a note with the same name and `type: project`, such as `sample-world/sample-world.md`. Its world bible sits in `bible/` (`characters/`, `locations/`, `world/`) and is shared by every book set in it. Each book is a folder in `books/` with a note of the same name, a story flow (`<book>-flow.md`) and `scenes/`. The project note lists its books in order under `## Books`; story-time adds each new book there. `research`, `scratchpad` and `templates` are never projects. `docs/vault-format.md` describes the full layout.
 
 **Properties** read by story-time (all optional, all editable in Obsidian):
 
@@ -73,17 +73,32 @@ Without a project argument, commands other than `stats` use the project folder y
 | book | `form` | `short-story`, `novelette`, `novella` or `novel` |
 | book | `target` | target words; `90000` or `"90,000"` |
 | book | `deadline` | `YYYY-MM-DD`; `stats` works out the words a day needed |
-| chapter | `status` | `outline` → `draft` → `revised` → `final` |
-| chapter | `pov`, `synopsis` | shown in `stats` and `outline` |
+| scene | `status` | `outline` → `draft` → `revised` → `final` |
+| scene | `pov`, `location` | links to a character and a location, shown in `stats`, `outline` and the Board |
+| scene | `when`, `synopsis` | when it happens in story time, in any form, and a sentence or two about it |
 | any note | `aliases` | the first is the note's name, the rest other names it goes by; `check` looks for all of them on the page |
 
 **Names.** Files and folders are named in lowercase kebab-case (`mara-chen.md`), so there are no spaces to quote and no names that differ only in case. A note's real name is its `title` (projects and books) or its first alias (everything else), and that is what story-time shows. Links are written `[[mara-chen|Mara Chen]]`: Obsidian follows the file name and shows the name. story-time resolves a bare link to the nearest note with that file name, in the linking note's project before anywhere else, and also accepts an alias; when a file name exists in more than one place, write the link with a path relative to the note (`[[../../../bible/characters/mara-chen|Mara Chen]]`) so Obsidian opens the right one.
 
-**Chapter order** comes from the file path, comparing numbers as numbers: `2-x` before `10-y`. Subfolders such as `chapters/part-1/` work too.
+**Contents.** A book's order is the list under `## Contents` in its note, so moving a scene renames nothing:
+
+```markdown
+## Contents
+
+### Part One
+
+- Chapter
+  - [[arrival|Arrival]]
+  - [[first-light|First Light]]
+- The Long Night
+  - [[leaving-home|Leaving Home]]
+```
+
+A list item that isn't a link is a chapter, titled by its text (`Chapter` for an untitled one), with its scenes indented beneath it as links; a link on its own is a chapter by itself. `###` headings make parts. Untitled chapters are numbered in order ("Chapter 1"); titled ones, such as a prologue, go by their title. Scenes in `scenes/` that the list leaves out are *unplaced*: they count toward the book's words but not its manuscript. story-time only ever rewrites this section, and only when the note hasn't changed on disk.
 
 **Word counts** cover the prose a reader would read. They leave out properties, headings (chapter and scene titles), `%% Obsidian comments %%`, `<!-- HTML comments -->`, callouts such as `> [!todo]`, code blocks and embeds. Links count as the text they display. Hyphenated words count once; words joined by an em dash count separately.
 
-**Templates** in the vault's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
+**Templates** in the vault's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{flow_link}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
 
 **The vault format.** `docs/vault-format.md` specifies the next version of this layout, which isn't implemented yet. story-time refuses to open a vault whose `.story-time/config.toml` has a `format` newer than it understands, rather than misread or change it.
 
@@ -97,10 +112,10 @@ Without a project argument, commands other than `stats` use the project folder y
 
 Story Time is a dedicated writing program laid out like Scrivener:
 
-- **Binder** (left): the open book's overview, story flow and chapters (numbered, with status and word count), then the world bible: the project's overview, characters, locations and world notes, each with a `+` to add one. With more than one book in a project, the top bar picks the book; **+ Book** adds another book set in the same world.
+- **Binder** (left): the open book's overview and story flow; its contents, part by part and chapter by chapter, with each scene's status and word count; its unplaced scenes; then the world bible: the project's overview, characters, locations and world notes. A `+` adds a scene at the end, to a chapter, or unplaced, or a world-bible note. With more than one book in a project, the top bar picks the book; **+ New** adds another book set in the same world, or starts a new project.
 - **Editor** (centre): a distraction-free page in Literata, with spellcheck, find and replace (Ctrl+F), and Markdown that is styled rather than shown raw. `%% notes to self %%` are dimmed.
-- **Inspector** (right): the open note's properties, such as chapter status, point of view and synopsis, a book's status, form, target and deadline, or a world's genres.
-- **Views:** *Board* (chapter cards with synopses), *Progress* (target, deadline pacing, last 30 days, chapters by status), *Check* (world-bible gaps, with one-click "create this note"), *Ideas* (capture ideas, or start a project from one).
+- **Inspector** (right): the open note's properties, such as a scene's place in the book, status, point of view, location, time and synopsis, a book's status, form, target and deadline, or a world's genres.
+- **Views:** *Board* (scene cards with synopses, grouped by chapter), *Progress* (target, deadline pacing, last 30 days, scenes by status), *Check* (world-bible gaps, with one-click "create this note"), *Ideas* (capture ideas, or start a project from one).
 - **Focus mode** (F11, Esc to leave): just the page, full screen.
 
 Writing saves itself a moment after you stop typing. Before every save, Story Time checks that the file hasn't changed on disk since it was opened, for example in Obsidian or through OneDrive sync. If it has, nothing is overwritten: you choose which version to keep. Switching back to the window reloads a note that was edited elsewhere.

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
   import { app, linkFrom, setProperty, toastError } from "../lib/store.svelte";
+  import type { NoteRef } from "../lib/types";
 
   const doc = $derived(app.doc);
 
@@ -13,7 +14,7 @@
     project: "World",
     book: "Book",
     flow: "Story flow",
-    chapter: "Chapter",
+    scene: "Scene",
     character: "Character",
     location: "Location",
     world: "World",
@@ -40,17 +41,17 @@
     );
   }
 
-  /** A point of view matching a character note is stored as a link to it, so Obsidian can follow it. */
-  async function setPov(value: string) {
+  /** A value naming a note (a point of view, a location) is stored as a link to it, so Obsidian can follow it. */
+  async function setLink(key: string, value: string, notes: NoteRef[]) {
     const name = value.trim();
-    const character = app.tree?.characters.find(
-      (c) => c.name.toLowerCase() === name.toLowerCase() || c.title.toLowerCase() === name.toLowerCase(),
+    const note = notes.find(
+      (n) => n.name.toLowerCase() === name.toLowerCase() || n.title.toLowerCase() === name.toLowerCase(),
     );
     const from = doc?.path;
-    if (!character || !from) return setProperty("pov", name);
+    if (!note || !from) return setProperty(key, name);
     try {
-      const link = await linkFrom(from, character.path);
-      if (app.doc?.path === from) setProperty("pov", link);
+      const link = await linkFrom(from, note.path);
+      if (app.doc?.path === from) setProperty(key, link);
     } catch (error) {
       toastError(error);
     }
@@ -60,10 +61,18 @@
     choices?.structures.find((s) => s.key === text("structure"))?.label ?? (text("structure") || "freeform"),
   );
 
-  const chapterPosition = $derived.by(() => {
-    const chapters = app.tree?.book?.chapters ?? [];
-    const index = chapters.findIndex((c) => c.path === doc?.path);
-    return index < 0 ? "" : `Chapter ${index + 1} of ${chapters.length}`;
+  /** Where the open scene sits in its book: "Part One · Chapter 2 · scene 1 of 3", or null if it's unplaced. */
+  const scenePosition = $derived.by(() => {
+    for (const part of app.tree?.book?.parts ?? []) {
+      for (const chapter of part.chapters) {
+        const index = chapter.scenes.findIndex((s) => s.path === doc?.path);
+        if (index >= 0) {
+          const scene = `scene ${index + 1} of ${chapter.scenes.length}`;
+          return [part.title, chapter.heading, scene].filter(Boolean).join(" · ");
+        }
+      }
+    }
+    return null;
   });
 </script>
 
@@ -71,12 +80,17 @@
   {#if doc && choices}
     <h2>{headings[doc.kind]}</h2>
 
-    {#if doc.kind === "chapter"}
-      <p class="muted">{chapterPosition}</p>
+    {#if doc.kind === "scene"}
+      {#if scenePosition}
+        <p class="muted">{scenePosition}</p>
+      {:else}
+        <p class="muted">Unplaced: not in the book's contents yet.</p>
+        <p class="hint">To place it, link it under <strong>Contents</strong> in the book's overview.</p>
+      {/if}
       <label class="field">
         <span>Status</span>
         <select value={text("status")} onchange={(e) => setProperty("status", e.currentTarget.value)}>
-          {#each options(choices.chapterStatuses, text("status")) as status (status)}
+          {#each options(choices.sceneStatuses, text("status")) as status (status)}
             <option value={status}>{status ? capitalise(status) : "—"}</option>
           {/each}
         </select>
@@ -87,7 +101,7 @@
           list="character-names"
           value={plainLinks(text("pov"))}
           placeholder="Whose eyes?"
-          onchange={(e) => setPov(e.currentTarget.value)}
+          onchange={(e) => setLink("pov", e.currentTarget.value, app.tree?.characters ?? [])}
         />
       </label>
       <datalist id="character-names">
@@ -95,6 +109,28 @@
           <option value={character.title}></option>
         {/each}
       </datalist>
+      <label class="field">
+        <span>Location</span>
+        <input
+          list="location-names"
+          value={plainLinks(text("location"))}
+          placeholder="Where?"
+          onchange={(e) => setLink("location", e.currentTarget.value, app.tree?.locations ?? [])}
+        />
+      </label>
+      <datalist id="location-names">
+        {#each app.tree?.locations ?? [] as location (location.path)}
+          <option value={location.title}></option>
+        {/each}
+      </datalist>
+      <label class="field">
+        <span>When</span>
+        <input
+          value={text("when")}
+          placeholder="Year 3, day 12 · three days later"
+          onchange={(e) => setProperty("when", e.currentTarget.value)}
+        />
+      </label>
       <label class="field">
         <span>Synopsis</span>
         <textarea
@@ -199,14 +235,15 @@
     {:else if doc.kind === "flow"}
       <p class="muted">Laid out as <strong>{structureName}</strong>.</p>
       <p class="hint">
-        Place chapters under the beats as you plan, one line per scene. The beats are a guide, not a rulebook.
+        Place scenes under the beats as you plan, a line each. The beats are a guide, not a rulebook; the book's
+        contents set the order it's read in.
       </p>
     {/if}
 
     <div class="facts">
       <span>{plural(app.docWords, "word")}</span>
       {#if doc.kind === "book" && app.tree?.book}
-        <span>{formatNumber(app.tree.book.summary.words)} in the chapters</span>
+        <span>{formatNumber(app.tree.book.summary.words)} in its scenes</span>
       {/if}
     </div>
     <p class="hint">

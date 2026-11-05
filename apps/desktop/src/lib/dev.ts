@@ -8,7 +8,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
-import { app, openNewBook, openNewProject, toggleFocus, VIEWS, type View } from "./store.svelte";
+import { app, bookScenes, openNewBook, openNewProject, openNote, toggleFocus, VIEWS, type View } from "./store.svelte";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -40,9 +40,13 @@ function type(text: string) {
 }
 
 async function snapshotTour(dir: string) {
+  const scenes = bookScenes(app.tree);
+  const unplaced = app.tree?.book?.unplaced[0];
   const shots: [string, () => unknown][] = [
     ["write", () => (app.view = "write")],
+    ["scene", () => scenes[0] && openNote(scenes[0].path)],
     ["typed", () => type("\n\nSnapshot tour sentence with eight words in it.\n")],
+    ["unplaced", () => unplaced && openNote(unplaced.path)],
     ["conflict", () => (app.saveState = "conflict")],
     [
       "board",

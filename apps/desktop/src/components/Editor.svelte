@@ -23,7 +23,6 @@
   const kindLabels: Record<string, string> = {
     project: "Overview",
     flow: "Story flow",
-    chapter: "Chapters",
     character: "Characters",
     location: "Locations",
     world: "World",
@@ -32,7 +31,7 @@
   const trail = $derived.by(() => {
     const doc = app.doc;
     if (!doc) return "";
-    const section = kindLabels[doc.kind] ?? "";
+    const section = doc.kind === "scene" ? app.tree?.book?.summary.title : kindLabels[doc.kind];
     const parts = [app.tree?.project.title, section];
     if (doc.kind !== "project" && doc.kind !== "flow") parts.push(doc.title);
     return parts.filter(Boolean).join("  ›  ");

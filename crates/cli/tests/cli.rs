@@ -43,7 +43,7 @@ fn a_project_from_idea_to_manuscript() {
     let root = dir.path();
 
     let init = ok(root, &["init"]);
-    assert!(init.contains("created  templates/chapter.md"), "{init}");
+    assert!(init.contains("created  templates/scene.md"), "{init}");
     assert!(root.join(".obsidian/templates.json").is_file());
 
     let new = ok(
@@ -76,15 +76,18 @@ fn a_project_from_idea_to_manuscript() {
         "{flow}"
     );
 
-    ok(root, &["add", "chapter", "Arrival"]);
+    let added = ok(root, &["add", "scene", "Arrival"]);
+    assert!(added.contains("as a chapter of its own"), "{added}");
     ok(root, &["add", "character", "Mara Chen", "-p", "sample"]);
-    let chapter = book.join("chapters/01-arrival.md");
-    let text = fs::read_to_string(&chapter)
+    let note = fs::read_to_string(book.join("sample-story.md")).unwrap();
+    assert!(note.contains("\n- [[arrival|Arrival]]\n"), "{note}");
+    let scene = book.join("scenes/arrival.md");
+    let text = fs::read_to_string(&scene)
         .unwrap()
         .replace("synopsis:", "synopsis: Mara arrives.")
         .replace("status: outline", "status: draft");
     fs::write(
-        &chapter,
+        &scene,
         format!(
             "{text}\n[[mara-chen|Mara Chen]] opened the door to the hall. %% fix %%\nNobody was there.\n"
         ),
@@ -99,10 +102,9 @@ fn a_project_from_idea_to_manuscript() {
 
     let outline = ok(root, &["outline"]);
     assert!(
-        outline.contains("01  Arrival  [draft · 11 words]"),
+        outline.contains("  Chapter 1\n    Arrival  [draft · 11 words]\n      Mara arrives.\n"),
         "{outline}"
     );
-    assert!(outline.contains("Mara arrives."), "{outline}");
 
     let check = ok(root, &["check"]);
     assert!(check.contains("Nothing to report."), "{check}");
@@ -122,12 +124,36 @@ fn a_project_from_idea_to_manuscript() {
     );
     fs::remove_file(root.join("sample-story-world/bible/characters/Old Tom.md")).unwrap();
 
-    ok(root, &["compile"]);
+    ok(root, &["add", "scene", "First Light", "--chapter", "1"]);
+    ok(root, &["add", "scene", "Aside", "--unplaced"]);
+    let note = fs::read_to_string(book.join("sample-story.md")).unwrap();
+    assert!(
+        note.contains("\n- Chapter\n  - [[arrival|Arrival]]\n  - [[first-light|First Light]]\n"),
+        "{note}"
+    );
+    let stats = ok(root, &["stats", "sample"]);
+    assert!(
+        stats.contains("Unplaced") && stats.contains("1 scene · 0 words, not in the manuscript"),
+        "{stats}"
+    );
+    let bad = run(root, &["add", "scene", "Lost", "--chapter", "7"]);
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("no chapter 7"),
+        "{}",
+        String::from_utf8_lossy(&bad.stderr)
+    );
+
+    let compiled = ok(root, &["compile"]);
+    assert!(
+        compiled.contains("1 chapter (1 scene, 11 words)"),
+        "{compiled}"
+    );
     let manuscript =
         fs::read_to_string(root.join(".story-time/build/sample-story-world/sample-story.md"))
             .unwrap();
     assert!(
-        manuscript.starts_with("---\ntitle: \"Sample Story\"\n---\n\n# Arrival\n"),
+        manuscript
+            .starts_with("---\ntitle: \"Sample Story\"\n---\n\n# Chapter 1\n\nMara Chen opened"),
         "{manuscript}"
     );
     assert!(
@@ -150,9 +176,13 @@ fn a_project_from_idea_to_manuscript() {
         String::from_utf8_lossy(&which.stderr).contains("which book of Sample Story?"),
         "a project with two books needs one named"
     );
-    ok(root, &["add", "chapter", "Arrival", "-b", "second"]);
+    let shared = run(root, &["add", "scene", "Arrival", "-b", "second"]);
     assert!(
-        root.join("sample-story-world/books/second-story/chapters/01-arrival.md")
+        String::from_utf8_lossy(&shared.stderr).contains("has the same name"),
+        "scenes in two books may share a name, with a warning"
+    );
+    assert!(
+        root.join("sample-story-world/books/second-story/scenes/arrival.md")
             .is_file()
     );
     let stats = ok(root, &["stats", "sample"]);
@@ -180,7 +210,7 @@ fn helpful_errors() {
 
     ok(root, &["new", "Other Story", "--form", "novella"]);
     ok(root, &["new", "Sample Story"]);
-    let ambiguous = run(root, &["add", "chapter", "One"]);
+    let ambiguous = run(root, &["add", "scene", "One"]);
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("which project?"));
     let missing_idea = run(root, &["new", "Missing", "--from-idea"]);
     assert!(String::from_utf8_lossy(&missing_idea.stderr).contains("no idea named \"Missing\""));
