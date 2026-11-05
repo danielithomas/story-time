@@ -6,7 +6,7 @@
   const bible: { kind: AddableKind; label: string; notes: () => NoteRef[] }[] = [
     { kind: "character", label: "Characters", notes: () => app.tree?.characters ?? [] },
     { kind: "location", label: "Locations", notes: () => app.tree?.locations ?? [] },
-    { kind: "world", label: "World", notes: () => app.tree?.world ?? [] },
+    { kind: "world", label: "World notes", notes: () => app.tree?.world ?? [] },
   ];
 
   const placeholders: Record<AddableKind, string> = {
@@ -60,38 +60,48 @@
 <aside class="binder">
   {#if app.tree}
     {@const tree = app.tree}
-    <section>
-      <h3>Project</h3>
-      <button class="item" class:active={isOpen(tree.projectNote.path)} onclick={() => openNote(tree.projectNote.path)}>
-        Overview
-      </button>
-      {#if tree.flowNote}
-        {@const flow = tree.flowNote}
-        <button class="item" class:active={isOpen(flow.path)} onclick={() => openNote(flow.path)}>Story flow</button>
-      {/if}
-    </section>
+    {#if tree.book}
+      {@const book = tree.book}
+      <section>
+        <h3>Book</h3>
+        <button class="item" class:active={isOpen(book.note.path)} onclick={() => openNote(book.note.path)}>
+          Overview
+        </button>
+        {#if book.flowNote}
+          {@const flow = book.flowNote}
+          <button class="item" class:active={isOpen(flow.path)} onclick={() => openNote(flow.path)}>Story flow</button>
+        {/if}
+      </section>
+
+      <section>
+        <h3>
+          Chapters
+          <button class="add" title="Add a chapter" onclick={() => start("chapter")}>+</button>
+        </h3>
+        {@render addForm("chapter")}
+        {#each book.chapters as chapter (chapter.path)}
+          <button
+            class="item chapter"
+            class:active={isOpen(chapter.path)}
+            title={chapter.synopsis ?? ""}
+            onclick={() => openNote(chapter.path)}
+          >
+            <span class="dot" data-status={chapter.status ?? ""}></span>
+            <span class="number">{chapterNumber(chapter.number)}</span>
+            <span class="title">{chapter.title}</span>
+            <span class="count">{formatNumber(chapter.words)}</span>
+          </button>
+        {:else}
+          <p class="empty">No chapters yet</p>
+        {/each}
+      </section>
+    {/if}
 
     <section>
-      <h3>
-        Chapters
-        <button class="add" title="Add a chapter" onclick={() => start("chapter")}>+</button>
-      </h3>
-      {@render addForm("chapter")}
-      {#each tree.chapters as chapter (chapter.path)}
-        <button
-          class="item chapter"
-          class:active={isOpen(chapter.path)}
-          title={chapter.synopsis ?? ""}
-          onclick={() => openNote(chapter.path)}
-        >
-          <span class="dot" data-status={chapter.status ?? ""}></span>
-          <span class="number">{chapterNumber(chapter.number)}</span>
-          <span class="title">{chapter.title}</span>
-          <span class="count">{formatNumber(chapter.words)}</span>
-        </button>
-      {:else}
-        <p class="empty">No chapters yet</p>
-      {/each}
+      <h3>World bible</h3>
+      <button class="item" class:active={isOpen(tree.projectNote.path)} onclick={() => openNote(tree.projectNote.path)}>
+        {tree.project.title}
+      </button>
     </section>
 
     {#each bible as group (group.kind)}

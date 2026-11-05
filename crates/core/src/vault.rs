@@ -9,7 +9,7 @@ use chrono::NaiveDateTime;
 
 use crate::config::{self, Config, META_DIR};
 use crate::history::History;
-use crate::project::{Chapter, Project};
+use crate::project::{Book, Chapter, Project};
 use crate::text::{natural_cmp, slugify};
 
 #[derive(Debug, Clone)]
@@ -147,23 +147,25 @@ impl Vault {
         }
     }
 
-    /// Every project with its chapters and word count.
+    /// Every book in every project, with its chapters and word count.
     pub fn measure(&self) -> Result<Vec<Measured>> {
-        self.projects()?
-            .into_iter()
-            .map(|project| {
-                let chapters = project.chapters()?;
+        let mut measured = Vec::new();
+        for project in self.projects()? {
+            for book in project.books()? {
+                let chapters = book.chapters()?;
                 let words = chapters.iter().map(|chapter| chapter.words as u64).sum();
-                Ok(Measured {
-                    project,
+                measured.push(Measured {
+                    project: project.clone(),
+                    book,
                     chapters,
                     words,
-                })
-            })
-            .collect()
+                });
+            }
+        }
+        Ok(measured)
     }
 
-    /// Measures every project and records the counts that changed in the writing log.
+    /// Measures every book and records the counts that changed in the writing log.
     pub fn snapshot(&self, now: NaiveDateTime) -> Result<(Vec<Measured>, History)> {
         let measured = self.measure()?;
         let path = self.history_path();
@@ -191,19 +193,20 @@ impl Vault {
     }
 }
 
-/// A project with its chapters and total words, as measured at one moment.
+/// A book with its chapters and total words, as measured at one moment.
 #[derive(Debug, Clone)]
 pub struct Measured {
     pub project: Project,
+    pub book: Book,
     pub chapters: Vec<Chapter>,
     pub words: u64,
 }
 
-/// Word counts by project, keyed as the writing log records them.
+/// Word counts by book, keyed as the writing log records them.
 pub fn counts(measured: &[Measured]) -> Vec<(String, u64)> {
     measured
         .iter()
-        .map(|m| (m.project.log_key(), m.words))
+        .map(|m| (m.book.log_key(), m.words))
         .collect()
 }
 

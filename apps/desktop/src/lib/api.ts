@@ -5,12 +5,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AddableKind,
   AddedNote,
+  BookProgress,
   CheckReport,
   Choices,
   CompileResult,
+  CreatedBook,
   Idea,
   NoteDoc,
-  ProjectProgress,
   ProjectSummary,
   ProjectTree,
   PropertyValue,
@@ -24,7 +25,7 @@ export const api = {
   openVault: (path: string) => invoke<VaultInfo>("open_vault", { path }),
   choices: () => invoke<Choices>("choices"),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
-  projectTree: (slug: string) => invoke<ProjectTree>("project_tree", { slug }),
+  projectTree: (slug: string, book: string | null) => invoke<ProjectTree>("project_tree", { slug, book }),
   readNote: (path: string) => invoke<NoteDoc>("read_note", { path }),
   saveNote: (args: {
     path: string;
@@ -36,20 +37,24 @@ export const api = {
   countWords: (text: string) => invoke<number>("count_words", { text }),
   createProject: (args: {
     title: string;
+    world: string | null;
     form: string;
     target: number | null;
     structure: string;
     fromIdea: string | null;
-  }) => invoke<ProjectSummary>("create_project", args),
-  addNote: (slug: string, kind: AddableKind, name: string) =>
-    invoke<AddedNote>("add_note", { slug, kind, name }),
+  }) => invoke<CreatedBook>("create_project", args),
+  createBook: (args: { slug: string; title: string; form: string; target: number | null; structure: string }) =>
+    invoke<CreatedBook>("create_book", args),
+  addNote: (slug: string, book: string | null, kind: AddableKind, name: string) =>
+    invoke<AddedNote>("add_note", { slug, book, kind, name }),
+  linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),
   writingToday: () => invoke<TodayInfo>("writing_today"),
   recordSnapshot: () => invoke<void>("record_snapshot"),
-  projectProgress: (slug: string, days: number) =>
-    invoke<ProjectProgress>("project_progress", { slug, days }),
+  bookProgress: (slug: string, book: string | null, days: number) =>
+    invoke<BookProgress>("book_progress", { slug, book, days }),
   checkProject: (slug: string) => invoke<CheckReport>("check_project", { slug }),
-  compileProject: (slug: string, format: string) =>
-    invoke<CompileResult>("compile_project", { slug, format }),
+  compileBook: (slug: string, book: string | null, format: string) =>
+    invoke<CompileResult>("compile_book", { slug, book, format }),
   listIdeas: () => invoke<Idea[]>("list_ideas"),
   captureIdea: (text: string, nonFiction: boolean) =>
     invoke<void>("capture_idea", { text, nonFiction }),

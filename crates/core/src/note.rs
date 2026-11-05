@@ -40,6 +40,70 @@ pub fn replace_body(content: &str, body: &str) -> String {
     }
 }
 
+/// The lines under a `## heading` in a note's body, up to the next heading at the same or a
+/// higher level, or `None` if the body has no such heading.
+pub fn section<'a>(body: &'a str, heading: &str) -> Option<Vec<&'a str>> {
+    let lines: Vec<&str> = body.lines().collect();
+    let (start, end) = find_section(&lines, heading)?;
+    Some(lines[start + 1..end].to_vec())
+}
+
+/// A note's text with the lines under `## heading` replaced by `lines`, or with the section
+/// added at the end if the body has none. The frontmatter and the rest of the body stay as
+/// written.
+pub fn set_section(content: &str, heading: &str, lines: &[String]) -> String {
+    let (_, body) = split_frontmatter(content);
+    let mut out: Vec<String> = body.lines().map(String::from).collect();
+    let mut replacement = vec![String::new()];
+    replacement.extend(lines.iter().cloned());
+    while replacement
+        .last()
+        .is_some_and(|line| line.trim().is_empty())
+    {
+        replacement.pop();
+    }
+    let borrowed: Vec<&str> = out.iter().map(String::as_str).collect();
+    match find_section(&borrowed, heading) {
+        Some((start, end)) => {
+            if end < out.len() {
+                replacement.push(String::new());
+            }
+            out.splice(start + 1..end, replacement);
+        }
+        None => {
+            while out.last().is_some_and(|line| line.trim().is_empty()) {
+                out.pop();
+            }
+            if !out.is_empty() {
+                out.push(String::new());
+            }
+            out.push(format!("## {heading}"));
+            out.extend(replacement);
+        }
+    }
+    replace_body(content, &(out.join("\n") + "\n"))
+}
+
+/// The index of the `## heading` line and of the line that ends its section.
+fn find_section(lines: &[&str], heading: &str) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| {
+        heading_level(line) == Some(2)
+            && line.trim_start()[2..].trim().eq_ignore_ascii_case(heading)
+    })?;
+    let end = (start + 1..lines.len())
+        .find(|&i| heading_level(lines[i]).is_some_and(|level| level <= 2))
+        .unwrap_or(lines.len());
+    Some((start, end))
+}
+
+/// The level of a Markdown heading line (`## Books` is 2), or `None` for other lines.
+fn heading_level(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start();
+    let level = trimmed.chars().take_while(|c| *c == '#').count();
+    let rest = &trimmed[level..];
+    ((1..=6).contains(&level) && (rest.is_empty() || rest.starts_with(' '))).then_some(level)
+}
+
 /// Identifies a note's content, to tell whether the file changed since it was read. Hashes are
 /// comparable within one run of a program, not across versions of it.
 pub fn content_hash(content: &str) -> String {
@@ -379,6 +443,31 @@ mod tests {
         assert_eq!(
             split_frontmatter("---\r\na: 1\r\n---\r\nBody"),
             (Some("a: 1\r\n"), "Body")
+        );
+    }
+
+    #[test]
+    fn reads_and_replaces_sections() {
+        let content = "---\ntype: project\n---\n# World\n\n## Books\n\n- [[one]]\n\n### Not the end\n\n## Notes\n\nKept.\n";
+        let (_, body) = split_frontmatter(content);
+        assert_eq!(
+            section(body, "books"),
+            Some(vec!["", "- [[one]]", "", "### Not the end", ""])
+        );
+        assert_eq!(section(body, "Themes"), None);
+        let lines = ["- [[one]]".to_string(), "- [[two]]".to_string()];
+        assert_eq!(
+            set_section(content, "Books", &lines),
+            "---\ntype: project\n---\n# World\n\n## Books\n\n- [[one]]\n- [[two]]\n\n## Notes\n\nKept.\n"
+        );
+        assert_eq!(
+            set_section("---\na: 1\n---\n# World\n\n", "Books", &lines),
+            "---\na: 1\n---\n# World\n\n## Books\n\n- [[one]]\n- [[two]]\n",
+            "a missing section is added at the end"
+        );
+        assert_eq!(
+            set_section("# World\n\n## Books\n- [[one]]\n", "Books", &lines),
+            "# World\n\n## Books\n\n- [[one]]\n- [[two]]\n"
         );
     }
 

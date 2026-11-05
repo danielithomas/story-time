@@ -2,30 +2,21 @@
 type: project
 id: {{id}}
 title: "{{title}}"
-status: planning
-form: {{form}}
-genre:
-target: {{target}}
-deadline:
+genre: []
 created: {{date}}
-tags:
-  - project
+tags: []
 ---
 # {{title}}
 
-**Logline:** %% One sentence: who wants what, what stands in their way, and what happens if they fail. %%
+%% The world this project's books share: what makes it distinct, and what its stories have in common. %%
 
-## Premise
+## Books
 
-{{premise}}
+## World bible
 
-## Story map
-
-- [[{{slug}}-flow|Story flow]]: the timeline of the whole story, with chapters, scenes and beats
-- `chapters/`: the book itself
-- `characters/`: who they are, how they look and speak, what drives them
-- `locations/`: where things happen
-- `world/`: how the story's world works
+- `bible/characters/`: who they are, how they look and speak, what drives them
+- `bible/locations/`: where things happen
+- `bible/world/`: how the world works, and what it costs
 
 ## Themes
 

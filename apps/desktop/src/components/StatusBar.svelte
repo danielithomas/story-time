@@ -24,10 +24,10 @@
     <span>Esc to leave focus</span>
   {/if}
   <span class="spacer"></span>
-  {#if app.tree}
-    {@const project = app.tree.project}
+  {#if app.tree?.book}
+    {@const book = app.tree.book.summary}
     <span>
-      {project.title}: {formatNumber(project.words)}{#if project.target}&nbsp;of {formatNumber(project.target)}{/if}
+      {book.title}: {formatNumber(book.words)}{#if book.target}&nbsp;of {formatNumber(book.target)}{/if}
     </span>
   {/if}
   {#if app.today}

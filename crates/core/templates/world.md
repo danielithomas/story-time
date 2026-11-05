@@ -1,11 +1,9 @@
 ---
 type: world
-project: "[[{{project_slug}}]]"
 category:
 aliases:
   - "{{title}}"
-tags:
-  - world
+tags: []
 ---
 # {{title}}
 

@@ -2,11 +2,14 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api";
   import { capitalise } from "../lib/format";
-  import { app, createProject } from "../lib/store.svelte";
+  import { app, createBook, createProject } from "../lib/store.svelte";
   import type { Idea } from "../lib/types";
 
+  const isBook = $derived(app.newProject?.mode === "book");
+  const world = $derived(app.tree?.project.title ?? "");
   let title = $state(app.newProject?.title ?? "");
   let idea = $state(app.newProject?.idea ?? "");
+  let worldName = $state("");
   let form = $state("novel");
   let target = $state<number | null>(null);
   let structure = $state("three-act");
@@ -15,7 +18,7 @@
   let error = $state("");
 
   onMount(() => {
-    api.listIdeas().then((all) => (ideas = all.filter((i) => !i.project)), () => {});
+    if (!isBook) api.listIdeas().then((all) => (ideas = all.filter((i) => !i.project)), () => {});
   });
 
   const formChoice = $derived(app.choices?.forms.find((f) => f.key === form));
@@ -31,7 +34,9 @@
     busy = true;
     error = "";
     try {
-      await createProject({ title: title.trim(), form, target: target || null, structure, fromIdea: idea || null });
+      const book = { title: title.trim(), form, target: target || null, structure };
+      if (isBook) await createBook(book);
+      else await createProject({ ...book, world: worldName.trim() || null, fromIdea: idea || null });
     } catch (e) {
       error = String(e);
     } finally {
@@ -51,12 +56,22 @@
 <div class="backdrop">
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
   <form onsubmit={submit}>
-    <h2 id="new-project-title">New project</h2>
+    <h2 id="new-project-title">{isBook ? `New book in ${world}` : "New project"}</h2>
 
     <label class="field">
       <span>Title</span>
-      <input bind:value={title} placeholder="The story's working title" use:focus required />
+      <input bind:value={title} placeholder="The book's working title" use:focus required />
     </label>
+
+    {#if isBook}
+      <p class="hint">It shares {world}'s world bible: its characters, locations and world notes.</p>
+    {:else}
+      <label class="field">
+        <span>World</span>
+        <input bind:value={worldName} placeholder="Same as the title" />
+      </label>
+      <p class="hint">Name the world if more books may be set in it. Books in one world share its characters, places and world notes.</p>
+    {/if}
 
     {#if ideas.length}
       <label class="field">
@@ -102,7 +117,7 @@
 
     <div class="buttons">
       <button type="button" class="btn" onclick={close}>Cancel</button>
-      <button class="btn primary" disabled={busy || !title.trim()}>Create project</button>
+      <button class="btn primary" disabled={busy || !title.trim()}>{isBook ? "Add book" : "Create project"}</button>
     </div>
   </form>
   </div>

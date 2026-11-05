@@ -1,15 +1,12 @@
 ---
 type: character
-project: "[[{{project_slug}}]]"
-role:
 aliases:
   - "{{title}}"
-tags:
-  - character
+tags: []
 ---
 # {{title}}
 
-%% role: protagonist, antagonist, supporting or minor. The first alias is this note's name; add nicknames and short names after it, so Obsidian's link suggestions and `story-time check` recognise them. %%
+%% The first alias is this note's name; add nicknames and short names after it, so Obsidian's link suggestions and `story-time check` recognise them. %%
 
 ## At a glance
 

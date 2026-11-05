@@ -2,20 +2,21 @@
   import { api } from "../lib/api";
   import { capitalise, duration, formatNumber, plural, signed } from "../lib/format";
   import { app, toastError } from "../lib/store.svelte";
-  import type { ProjectProgress } from "../lib/types";
+  import type { BookProgress } from "../lib/types";
 
   const DAYS = 30;
-  let progress = $state<ProjectProgress | null>(null);
+  let progress = $state<BookProgress | null>(null);
 
-  // Reload when the project changes, and after saves refresh today's count.
+  // Reload when the project or book changes, and after saves refresh today's count.
   $effect(() => {
     const slug = app.slug;
+    const book = app.book;
     void app.today;
-    if (slug) api.projectProgress(slug, DAYS).then((p) => (progress = p), toastError);
+    if (slug) api.bookProgress(slug, book, DAYS).then((p) => (progress = p), toastError);
   });
 
   const fraction = $derived(
-    progress?.project.target ? Math.min(1, progress.project.words / progress.project.target) : 0,
+    progress?.book.target ? Math.min(1, progress.book.words / progress.book.target) : 0,
   );
   const scale = $derived(Math.max(progress?.goal ?? 0, ...(progress?.history.map((d) => d.words) ?? [0]), 1));
   const totalChapters = $derived(progress?.statuses.reduce((sum, s) => sum + s.chapters, 0) ?? 0);
@@ -28,24 +29,27 @@
   {@const p = progress}
   <div class="view">
     <header>
-      <h1>{p.project.title}</h1>
+      <h1>{p.book.title}</h1>
       <p class="muted">
-        {[p.project.status, p.project.formLabel, p.project.genre].filter(Boolean).map((s) => capitalise(s!)).join(" · ")}
+        {[p.worldTitle !== p.book.title ? p.worldTitle : null, p.book.status, p.book.formLabel, p.genre.join(", ")]
+          .filter(Boolean)
+          .map((s) => capitalise(s!))
+          .join(" · ")}
       </p>
     </header>
 
     <section class="headline">
       <div class="big">
-        <strong>{formatNumber(p.project.words)}</strong>
-        <span class="muted">{p.project.target ? `of ${formatNumber(p.project.target)} words` : "words"}</span>
+        <strong>{formatNumber(p.book.words)}</strong>
+        <span class="muted">{p.book.target ? `of ${formatNumber(p.book.target)} words` : "words"}</span>
       </div>
-      {#if p.project.target}
+      {#if p.book.target}
         <div class="meter"><div style:width="{fraction * 100}%"></div></div>
         <p class="muted">
           {Math.floor(fraction * 100)}% ·
-          {p.project.words >= p.project.target
+          {p.book.words >= p.book.target
             ? "target reached"
-            : `${formatNumber(p.project.target - p.project.words)} to go`}
+            : `${formatNumber(p.book.target - p.book.words)} to go`}
         </p>
       {/if}
     </section>
@@ -58,14 +62,14 @@
       </div>
       <div class="tile">
         <span class="label">Deadline</span>
-        {#if p.project.deadline}
+        {#if p.book.deadline}
           <strong>{p.daysLeft != null && p.daysLeft > 0 ? plural(p.daysLeft, "day") : "Passed"}</strong>
           <span class="muted">
-            {p.project.deadline}{#if p.wordsPerDay} · {formatNumber(p.wordsPerDay)} words a day{/if}
+            {p.book.deadline}{#if p.wordsPerDay} · {formatNumber(p.wordsPerDay)} words a day{/if}
           </span>
         {:else}
           <strong>—</strong>
-          <span class="muted">Set one in the project overview</span>
+          <span class="muted">Set one in the book's overview</span>
         {/if}
       </div>
       <div class="tile">
@@ -79,7 +83,7 @@
         <span class="muted">about {duration(p.readingMinutes)} to read</span>
       </div>
       <div class="tile">
-        <span class="label">Story bible</span>
+        <span class="label">World bible</span>
         <strong>{p.characters + p.locations + p.world} notes</strong>
         <span class="muted">
           {plural(p.characters, "character")} · {plural(p.locations, "location")} · {plural(p.world, "world note")}

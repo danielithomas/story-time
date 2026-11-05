@@ -1,6 +1,6 @@
 <script lang="ts">
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
-  import { app, setProperty } from "../lib/store.svelte";
+  import { app, linkFrom, setProperty, toastError } from "../lib/store.svelte";
 
   const doc = $derived(app.doc);
 
@@ -10,7 +10,8 @@
   const choices = $derived(app.choices);
 
   const headings: Record<string, string> = {
-    project: "Project",
+    project: "World",
+    book: "Book",
     flow: "Story flow",
     chapter: "Chapter",
     character: "Character",
@@ -40,12 +41,19 @@
   }
 
   /** A point of view matching a character note is stored as a link to it, so Obsidian can follow it. */
-  function setPov(value: string) {
+  async function setPov(value: string) {
     const name = value.trim();
     const character = app.tree?.characters.find(
       (c) => c.name.toLowerCase() === name.toLowerCase() || c.title.toLowerCase() === name.toLowerCase(),
     );
-    setProperty("pov", character ? `[[${character.name}]]` : name);
+    const from = doc?.path;
+    if (!character || !from) return setProperty("pov", name);
+    try {
+      const link = await linkFrom(from, character.path);
+      if (app.doc?.path === from) setProperty("pov", link);
+    } catch (error) {
+      toastError(error);
+    }
   }
 
   const structureName = $derived(
@@ -53,7 +61,7 @@
   );
 
   const chapterPosition = $derived.by(() => {
-    const chapters = app.tree?.chapters ?? [];
+    const chapters = app.tree?.book?.chapters ?? [];
     const index = chapters.findIndex((c) => c.path === doc?.path);
     return index < 0 ? "" : `Chapter ${index + 1} of ${chapters.length}`;
   });
@@ -98,22 +106,14 @@
       </label>
     {:else if doc.kind === "character"}
       <label class="field">
-        <span>Role</span>
-        <select value={text("role")} onchange={(e) => setProperty("role", e.currentTarget.value)}>
-          {#each options(choices.roles, text("role")) as role (role)}
-            <option value={role}>{role ? capitalise(role) : "—"}</option>
-          {/each}
-        </select>
+        <span>Names</span>
+        <input value={text("aliases")} placeholder="Name, then nicknames" onchange={(e) => setList("aliases", e.currentTarget.value)} />
       </label>
-      <label class="field">
-        <span>Also known as</span>
-        <input value={text("aliases")} placeholder="Nicknames, short names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
-      </label>
-      <p class="hint">Separate names with commas. Checks look for these on the page.</p>
+      <p class="hint">The first is the note's name; add nicknames and short names after it, separated by commas. Checks look for all of them on the page.</p>
     {:else if doc.kind === "location"}
       <label class="field">
-        <span>Also known as</span>
-        <input value={text("aliases")} placeholder="Other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
+        <span>Names</span>
+        <input value={text("aliases")} placeholder="Name, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
       </label>
     {:else if doc.kind === "world"}
       <label class="field">
@@ -131,8 +131,8 @@
         {/each}
       </datalist>
       <label class="field">
-        <span>Also known as</span>
-        <input value={text("aliases")} placeholder="Other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
+        <span>Names</span>
+        <input value={text("aliases")} placeholder="Name, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
       </label>
     {:else if doc.kind === "project"}
       <label class="field">
@@ -140,9 +140,19 @@
         <input value={text("title")} onchange={(e) => setProperty("title", e.currentTarget.value)} />
       </label>
       <label class="field">
+        <span>Genres</span>
+        <input value={text("genre")} placeholder="Space opera, mystery…" onchange={(e) => setList("genre", e.currentTarget.value)} />
+      </label>
+      <p class="hint">The world every book in this project shares. Separate genres with commas.</p>
+    {:else if doc.kind === "book"}
+      <label class="field">
+        <span>Title</span>
+        <input value={text("title")} onchange={(e) => setProperty("title", e.currentTarget.value)} />
+      </label>
+      <label class="field">
         <span>Status</span>
         <select value={text("status")} onchange={(e) => setProperty("status", e.currentTarget.value)}>
-          {#each options(choices.projectStatuses, text("status")) as status (status)}
+          {#each options(choices.bookStatuses, text("status")) as status (status)}
             <option value={status}>{status ? capitalise(status) : "—"}</option>
           {/each}
         </select>
@@ -155,10 +165,6 @@
             <option value={form.key}>{capitalise(form.label)}</option>
           {/each}
         </select>
-      </label>
-      <label class="field">
-        <span>Genre</span>
-        <input value={text("genre")} onchange={(e) => setProperty("genre", e.currentTarget.value)} />
       </label>
       <div class="pair">
         <label class="field">
@@ -199,8 +205,8 @@
 
     <div class="facts">
       <span>{plural(app.docWords, "word")}</span>
-      {#if doc.kind === "project" && app.tree}
-        <span>{formatNumber(app.tree.project.words)} in the chapters</span>
+      {#if doc.kind === "book" && app.tree?.book}
+        <span>{formatNumber(app.tree.book.summary.words)} in the chapters</span>
       {/if}
     </div>
     <p class="hint">

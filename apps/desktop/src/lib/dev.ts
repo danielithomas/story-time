@@ -1,14 +1,14 @@
 // Development-only helpers for checking screens without clicking through them. Loaded by
 // init() only when running `npm run tauri dev`; release builds never include this file.
 //
-//   VITE_START_VIEW=board npm run tauri dev         open straight into a view (or focus, new-project)
+//   VITE_START_VIEW=board npm run tauri dev         open straight into a view (or focus, new-project, new-book)
 //   VITE_SNAPSHOT_DIR=/tmp/shots npm run tauri dev  save a PNG of every screen, typing a test
 //                                                   sentence into the open note along the way
 //   VITE_THEME=light npm run tauri dev              use the light palette whatever the system says
 
 import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
-import { app, openNewProject, toggleFocus, VIEWS, type View } from "./store.svelte";
+import { app, openNewBook, openNewProject, toggleFocus, VIEWS, type View } from "./store.svelte";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -28,6 +28,7 @@ export async function run() {
 async function startView(start: string) {
   if (start === "focus") await toggleFocus(true);
   else if (start === "new-project") openNewProject();
+  else if (start === "new-book") openNewBook();
   else if (VIEWS.some((view) => view.key === start)) app.view = start as View;
 }
 
@@ -54,6 +55,13 @@ async function snapshotTour(dir: string) {
     ["check", () => (app.view = "check")],
     ["ideas", () => (app.view = "ideas")],
     ["new-project", () => openNewProject()],
+    [
+      "new-book",
+      () => {
+        app.newProject = null;
+        openNewBook();
+      },
+    ],
     [
       "focus",
       () => {

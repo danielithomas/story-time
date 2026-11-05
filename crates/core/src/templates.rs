@@ -2,8 +2,8 @@
 //! built-in versions, so a template edited in Obsidian changes what story-time creates too.
 //!
 //! Obsidian's Templates plugin fills `{{title}}`, `{{date}}` and `{{time}}`. story-time fills those
-//! plus `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`,
-//! `{{premise}}`, `{{structure}}` and `{{structure_name}}`, and leaves any other placeholder as it
+//! plus `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`,
+//! `{{flow_link}}`, `{{structure}}` and `{{structure_name}}`, and leaves any other placeholder as it
 //! is.
 
 use std::fs;
@@ -26,6 +26,10 @@ pub const PROJECT: Template = Template {
     file_name: "project.md",
     default: include_str!("../templates/project.md"),
 };
+pub const BOOK: Template = Template {
+    file_name: "book.md",
+    default: include_str!("../templates/book.md"),
+};
 pub const FLOW: Template = Template {
     file_name: "story-flow.md",
     default: include_str!("../templates/story-flow.md"),
@@ -47,7 +51,9 @@ pub const WORLD: Template = Template {
     default: include_str!("../templates/world.md"),
 };
 
-pub const ALL: [&Template; 6] = [&PROJECT, &FLOW, &CHAPTER, &CHARACTER, &LOCATION, &WORLD];
+pub const ALL: [&Template; 7] = [
+    &PROJECT, &BOOK, &FLOW, &CHAPTER, &CHARACTER, &LOCATION, &WORLD,
+];
 
 pub fn for_kind(kind: NoteKind) -> &'static Template {
     match kind {

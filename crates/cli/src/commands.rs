@@ -6,11 +6,11 @@ use anyhow::{Context, Result, bail};
 use chrono::{Days, NaiveDateTime};
 use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
+use story_time_core::history::History;
 use story_time_core::ideas;
-use story_time_core::scaffold::{self, NewProject, Step};
-use story_time_core::structures::Structure;
+use story_time_core::scaffold::{self, NewBook, NewProject, Step};
 use story_time_core::vault::Measured;
-use story_time_core::{Form, NoteKind, Vault};
+use story_time_core::{Book, Form, NoteKind, Vault};
 
 use crate::output::{Align, Table, bar, percent, plural, signed, thousands, wrap};
 
@@ -44,33 +44,19 @@ pub fn init(root: &Path, force: bool) -> Result<()> {
 
 pub fn new(
     vault: &Vault,
-    title: &str,
-    form: Form,
-    target: Option<u64>,
-    structure: &'static Structure,
+    world: Option<&str>,
+    book: &NewBook,
     from_idea: Option<Option<String>>,
     now: NaiveDateTime,
 ) -> Result<()> {
-    let idea = from_idea.map(|name| name.unwrap_or_else(|| title.to_string()));
-    let spec = NewProject {
-        title,
-        form,
-        target,
-        structure,
-        premise: None,
-    };
-    let project = scaffold::start_project(vault, &spec, idea.as_deref(), now)?;
-
+    let idea = from_idea.map(|name| name.unwrap_or_else(|| book.title.to_string()));
+    let spec = NewProject { world, book: *book };
+    let (project, created) = scaffold::start_project(vault, &spec, idea.as_deref(), now)?;
     let slug = &project.slug;
-    let target = project.target().unwrap_or(form.default_target());
     println!("Created {slug}/");
-    println!("  {slug}.md       project note: logline, premise, themes");
-    println!(
-        "  {slug}-flow.md  story flow: {} for about {} words",
-        structure.name,
-        thousands(target as i64)
-    );
-    println!("  chapters/  characters/  locations/  world/");
+    println!("  {slug}.md  the project note: the world and its books, in order");
+    println!("  bible/  characters/, locations/ and world/, shared by every book");
+    print_book(&created, book);
     if idea.is_some() {
         println!(
             "\nCopied the premise from {} and linked the idea to [[{slug}]].",
@@ -81,16 +67,52 @@ pub fn new(
     Ok(())
 }
 
+pub fn new_book(
+    vault: &Vault,
+    cwd: &Path,
+    project: &str,
+    book: &NewBook,
+    now: NaiveDateTime,
+) -> Result<()> {
+    let project = vault.find_project(Some(project), cwd)?;
+    let created = scaffold::start_book(vault, &project, book, now)?;
+    println!("Added {} to {}/", created.title(), project.slug);
+    print_book(&created, book);
+    println!(
+        "\nNext: story-time add chapter \"Chapter title\" -p {} -b {}",
+        project.slug, created.slug
+    );
+    Ok(())
+}
+
+fn print_book(book: &Book, spec: &NewBook) {
+    let slug = &book.slug;
+    let target = book.target().unwrap_or(spec.form.default_target());
+    println!("  books/{slug}/");
+    println!("    {slug}.md       book note: logline, premise, status and target");
+    println!(
+        "    {slug}-flow.md  story flow: {} for about {} words",
+        spec.structure.name,
+        thousands(target as i64)
+    );
+    println!("    chapters/");
+}
+
 pub fn add(
     vault: &Vault,
     cwd: &Path,
     kind: NoteKind,
     name: &str,
     project: Option<&str>,
+    book: Option<&str>,
     now: NaiveDateTime,
 ) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
-    let note = scaffold::add_note(vault, &project, kind, name, now.date())?;
+    let book = match kind {
+        NoteKind::Chapter => Some(project.find_book(book, cwd)?),
+        _ => None,
+    };
+    let note = scaffold::add_note(vault, &project, book.as_ref(), kind, name, now.date())?;
     println!("Created {}", vault.relative(&note.path).display());
     if let Some(other) = note.same_name {
         eprintln!(
@@ -104,11 +126,12 @@ pub fn add(
 pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     let (measured, history) = vault.snapshot(now)?;
     if measured.is_empty() {
-        println!("No projects yet. Start one with: story-time new \"Title\"");
+        println!("No books yet. Start one with: story-time new \"Title\"");
         return Ok(());
     }
     let mut table = Table::new(&[
-        ("Project", Align::Left),
+        ("Book", Align::Left),
+        ("World", Align::Left),
         ("Status", Align::Left),
         ("Form", Align::Left),
         ("Chapters", Align::Right),
@@ -118,16 +141,18 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     ]);
     for Measured {
         project,
+        book,
         chapters,
         words,
     } in &measured
     {
-        let target = project.target();
+        let target = book.target();
+        let (title, world) = (book.title(), project.title());
         table.row(vec![
-            project.title(),
-            project.status().unwrap_or_default(),
-            project
-                .form()
+            title.clone(),
+            if world == title { String::new() } else { world },
+            book.status().unwrap_or_default(),
+            book.form()
                 .map(|form| form.label().to_string())
                 .unwrap_or_default(),
             chapters.len().to_string(),
@@ -161,20 +186,52 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
 pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime) -> Result<()> {
     let project = vault.find_project(Some(query), cwd)?;
     let (measured, history) = vault.snapshot(now)?;
+    let books: Vec<Measured> = measured
+        .into_iter()
+        .filter(|m| m.project.slug == project.slug)
+        .collect();
+    if books.is_empty() {
+        println!(
+            "\n  {} has no books yet. Add one with: story-time new \"Title\" --in {}",
+            project.title(),
+            project.slug
+        );
+    }
+    for measured in &books {
+        book_stats(vault, measured, &history, now);
+    }
+    let bible = BIBLE
+        .iter()
+        .map(|kind| {
+            let count = project.notes(*kind)?.len() as u64;
+            Ok(match kind {
+                NoteKind::Character => plural(count, "character", "characters"),
+                NoteKind::Location => plural(count, "location", "locations"),
+                _ => plural(count, "world note", "world notes"),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    println!(
+        "\n  World bible of {}: {}",
+        project.title(),
+        bible.join(" · ")
+    );
+    Ok(())
+}
+
+fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveDateTime) {
     let Measured {
         project,
+        book,
         chapters,
         words,
-    } = measured
-        .into_iter()
-        .find(|m| m.project.slug == project.slug)
-        .context("the project disappeared while being measured")?;
-
-    println!("\n  {}", project.title());
+    } = measured;
+    let words = *words;
+    println!("\n  {}", book.title());
     let details: Vec<String> = [
-        project.status(),
-        project.form().map(|form| form.label().to_string()),
-        project.genre(),
+        book.status(),
+        book.form().map(|form| form.label().to_string()),
+        Some(project.genre().join(", ")).filter(|genre| !genre.is_empty()),
     ]
     .into_iter()
     .flatten()
@@ -185,8 +242,8 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
     println!();
     if chapters.is_empty() {
         println!(
-            "  No chapters yet. Add one with: story-time add chapter \"Title\" -p {}",
-            project.slug
+            "  No chapters yet. Add one with: story-time add chapter \"Title\" -p {} -b {}",
+            project.slug, book.slug
         );
     } else {
         let mut table = Table::new(&[
@@ -196,7 +253,7 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
             ("POV", Align::Left),
             ("Words", Align::Right),
         ]);
-        for chapter in &chapters {
+        for chapter in chapters {
             table.row(vec![
                 chapter
                     .number()
@@ -219,7 +276,7 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
     }
     println!();
 
-    if let Some(target) = project.target() {
+    if let Some(target) = book.target() {
         let left = target.saturating_sub(words);
         let remaining = if left == 0 {
             "target reached".to_string()
@@ -232,7 +289,7 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
             percent(words, target),
             thousands(target as i64)
         );
-        if let Some(deadline) = project.deadline() {
+        if let Some(deadline) = book.deadline() {
             let days_left = (deadline - now.date()).num_days();
             if days_left > 0 && left > 0 {
                 let per_day = left.div_ceil(days_left as u64);
@@ -263,27 +320,15 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
     }
     println!(
         "  Today        {} words",
-        signed(history.written_on(now.date(), Some(&project.log_key())))
+        signed(history.written_on(now.date(), Some(&book.log_key())))
     );
-    let bible = BIBLE
-        .iter()
-        .map(|kind| {
-            let count = project.notes(*kind)?.len() as u64;
-            Ok(match kind {
-                NoteKind::Character => plural(count, "character", "characters"),
-                NoteKind::Location => plural(count, "location", "locations"),
-                _ => plural(count, "world note", "world notes"),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    println!("  Story bible  {}", bible.join(" · "));
-    Ok(())
 }
 
-pub fn outline(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
+pub fn outline(vault: &Vault, cwd: &Path, project: Option<&str>, book: Option<&str>) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
-    let chapters = project.chapters()?;
-    println!("\n  {}: outline\n", project.title());
+    let book = project.find_book(book, cwd)?;
+    let chapters = book.chapters()?;
+    println!("\n  {}: outline\n", book.title());
     if chapters.is_empty() {
         println!("  No chapters yet.");
         return Ok(());
@@ -340,10 +385,10 @@ pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
         },
     );
     let mut table = Table::new(&[("", Align::Left), ("", Align::Right)]);
-    for Measured { project, .. } in &measured {
-        let words = history.written_on(day, Some(&project.log_key()));
+    for Measured { book, .. } in &measured {
+        let words = history.written_on(day, Some(&book.log_key()));
         if words != 0 {
-            table.row(vec![project.title(), signed(words)]);
+            table.row(vec![book.title(), signed(words)]);
         }
     }
     table.print(4);
@@ -423,7 +468,7 @@ pub fn idea(vault: &Vault, text: &str, non_fiction: bool) -> Result<()> {
 pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
     let report = check::check(vault, &project)?;
-    println!("\n  Story bible check: {}\n", project.title());
+    println!("\n  World bible check: {}\n", project.title());
     if report.is_clean() {
         println!("  Nothing to report.");
         return Ok(());
@@ -510,18 +555,21 @@ pub fn compile(
     vault: &Vault,
     cwd: &Path,
     project: Option<&str>,
+    book: Option<&str>,
     format: Format,
     output: Option<PathBuf>,
 ) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
-    let manuscript = compile::manuscript(&project, vault.config.author.as_deref())?;
+    let book = project.find_book(book, cwd)?;
+    let manuscript = compile::manuscript(&book, vault.config.author.as_deref())?;
     if manuscript.chapters == 0 {
-        bail!("{} has no chapters with words in them yet", project.title());
+        bail!("{} has no chapters with words in them yet", book.title());
     }
     let out = output.unwrap_or_else(|| {
         vault
             .build_dir()
-            .join(format!("{}.{}", project.slug, format.key()))
+            .join(&project.slug)
+            .join(format!("{}.{}", book.slug, format.key()))
     });
     compile::export(&manuscript.markdown, &out, format)?;
     println!(

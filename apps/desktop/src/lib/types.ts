@@ -17,21 +17,33 @@ export interface Choices {
   structures: Choice[];
   formats: Choice[];
   chapterStatuses: string[];
-  projectStatuses: string[];
-  roles: string[];
+  bookStatuses: string[];
 }
 
+/** A project: a world and the books set in it. */
 export interface ProjectSummary {
+  slug: string;
+  title: string;
+  genre: string[];
+  books: BookSummary[];
+}
+
+export interface BookSummary {
   slug: string;
   title: string;
   status: string | null;
   form: string | null;
   formLabel: string | null;
-  genre: string | null;
   target: number | null;
   deadline: string | null;
   words: number;
   chapters: number;
+}
+
+export interface CreatedBook {
+  project: string;
+  book: string;
+  title: string;
 }
 
 export interface NoteRef {
@@ -52,25 +64,33 @@ export interface ChapterRef extends NoteRef {
   words: number;
 }
 
+/** A project's notes, with one of its books open. */
 export interface ProjectTree {
   project: ProjectSummary;
   projectNote: NoteRef;
-  flowNote: NoteRef | null;
-  chapters: ChapterRef[];
+  book: BookTree | null;
   characters: NoteRef[];
   locations: NoteRef[];
   world: NoteRef[];
 }
 
+export interface BookTree {
+  summary: BookSummary;
+  note: NoteRef;
+  flowNote: NoteRef | null;
+  chapters: ChapterRef[];
+}
+
 export type PropertyValue = string | string[];
 
-export type NoteKind = "project" | "flow" | "chapter" | "character" | "location" | "world" | "note";
+export type NoteKind = "project" | "book" | "flow" | "chapter" | "character" | "location" | "world" | "note";
 
 export interface NoteDoc {
   path: string;
   name: string;
   kind: NoteKind;
   project: string | null;
+  book: string | null;
   title: string;
   body: string;
   properties: Record<string, PropertyValue>;
@@ -90,8 +110,10 @@ export interface TodayInfo {
   streak: number;
 }
 
-export interface ProjectProgress {
-  project: ProjectSummary;
+export interface BookProgress {
+  book: BookSummary;
+  worldTitle: string;
+  genre: string[];
   lengthLabel: string | null;
   lengthRange: string | null;
   pages: number;

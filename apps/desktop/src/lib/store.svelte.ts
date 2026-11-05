@@ -46,7 +46,9 @@ export const app = $state({
   vault: null as VaultInfo | null,
   choices: null as Choices | null,
   projects: [] as ProjectSummary[],
+  /** The open project, and the book open in it. */
   slug: null as string | null,
+  book: null as string | null,
   tree: null as ProjectTree | null,
   doc: null as NoteDoc | null,
   /** Bumped whenever the editor should load `doc.body` afresh. */
@@ -56,8 +58,8 @@ export const app = $state({
   view: "write" as View,
   focus: false,
   today: null as TodayInfo | null,
-  /** Set while the new-project dialog is open. */
-  newProject: null as { title: string; idea: string | null } | null,
+  /** Set while the new-project dialog is open: for a new project, or a new book in the open one. */
+  newProject: null as { title: string; idea: string | null; mode: "project" | "book" } | null,
   toasts: [] as Toast[],
 });
 
@@ -114,6 +116,7 @@ async function enterVault() {
     await selectProject(slug);
   } else {
     app.slug = null;
+    app.book = null;
     app.tree = null;
     clearDoc();
   }
@@ -139,29 +142,42 @@ async function loadProjects() {
   app.projects = await api.listProjects();
 }
 
-export async function selectProject(slug: string) {
+/** Opens a project, with `book` (else the book last open in it, else its first) open in it. */
+export async function selectProject(slug: string, book: string | null = null) {
   if (!(await settle())) return;
   try {
     app.slug = slug;
     remember("project", slug);
-    app.tree = await api.projectTree(slug);
+    app.tree = await api.projectTree(slug, book ?? remembered(`book:${slug}`));
+    app.book = app.tree.book?.summary.slug ?? null;
+    if (app.book) remember(`book:${slug}`, app.book);
     const last = remembered(`note:${slug}`);
     const known = allNotes(app.tree).some((note) => note.path === last);
-    await openNote(known && last ? last : app.tree.projectNote.path, false);
+    const start = app.tree.book?.note.path ?? app.tree.projectNote.path;
+    await openNote(known && last && !book ? last : start, false);
   } catch (error) {
     toastError(error);
   }
 }
 
+export async function selectBook(book: string) {
+  if (app.slug) await selectProject(app.slug, book);
+}
+
 export function allNotes(tree: ProjectTree): NoteRef[] {
+  const book = tree.book;
   return [
     tree.projectNote,
-    ...(tree.flowNote ? [tree.flowNote] : []),
-    ...tree.chapters,
+    ...(book ? [book.note, ...(book.flowNote ? [book.flowNote] : []), ...book.chapters] : []),
     ...tree.characters,
     ...tree.locations,
     ...tree.world,
   ];
+}
+
+/** A link to a note, written so that both Story Time and Obsidian follow it. */
+export function linkFrom(from: string, to: string): Promise<string> {
+  return api.linkFor(from, to);
 }
 
 /** Opens a note in the editor, saving the current one first. */
@@ -200,30 +216,46 @@ function clearDoc() {
 }
 
 export function openNewProject(title = "", idea: string | null = null) {
-  app.newProject = { title, idea };
+  app.newProject = { title, idea, mode: "project" };
+}
+
+export function openNewBook() {
+  if (app.slug) app.newProject = { title: "", idea: null, mode: "book" };
 }
 
 export async function createProject(args: {
   title: string;
+  world: string | null;
   form: string;
   target: number | null;
   structure: string;
   fromIdea: string | null;
 }) {
   if (!(await settle())) return;
-  const project = await api.createProject(args);
+  const created = await api.createProject(args);
   app.newProject = null;
   await loadProjects();
-  await selectProject(project.slug);
+  await selectProject(created.project, created.book);
   app.view = "write";
-  toast(`Started ${project.title}.`);
+  toast(`Started ${created.title}.`);
+}
+
+/** Adds a book to the open project. Story Time adds it to the project note's list of books. */
+export async function createBook(args: { title: string; form: string; target: number | null; structure: string }) {
+  if (!app.slug || !(await settle())) return;
+  const created = await api.createBook({ slug: app.slug, ...args });
+  app.newProject = null;
+  await loadProjects();
+  await selectProject(created.project, created.book);
+  app.view = "write";
+  toast(`Added ${created.title}.`);
 }
 
 export async function addNote(kind: AddableKind, name: string) {
   if (!app.slug) return;
   try {
-    const added = await api.addNote(app.slug, kind, name);
-    app.tree = await api.projectTree(app.slug);
+    const added = await api.addNote(app.slug, app.book, kind, name);
+    app.tree = await api.projectTree(app.slug, app.book);
     await openNote(added.path);
     if (added.sameName) {
       toast(`${added.sameName} has the same name, so links to "${added.name}" may go to either note.`);
@@ -359,7 +391,7 @@ function scheduleRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(async () => {
     try {
-      if (app.slug) app.tree = await api.projectTree(app.slug);
+      if (app.slug) app.tree = await api.projectTree(app.slug, app.book);
       await loadProjects();
       await refreshToday();
     } catch {
@@ -377,7 +409,7 @@ async function refreshToday() {
 export async function compile(format: string) {
   if (!app.slug || !(await settle())) return;
   try {
-    const result = await api.compileProject(app.slug, format);
+    const result = await api.compileBook(app.slug, app.book, format);
     const skipped = result.skipped.length ? ` Left out ${plural(result.skipped.length, "empty chapter")}.` : "";
     toast(`Exported ${plural(result.chapters, "chapter")}, ${formatNumber(result.words)} words.${skipped}`, {
       label: "Show file",

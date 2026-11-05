@@ -1,4 +1,4 @@
-//! Stitching a project's chapters into one manuscript, and exporting it with pandoc.
+//! Stitching a book's chapters into one manuscript, and exporting it with pandoc.
 
 use std::fs;
 use std::io::{self, Write};
@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 
-use crate::project::Project;
+use crate::project::Book;
 use crate::text::yaml_escape;
 use crate::words::prose;
 
@@ -68,14 +68,14 @@ pub struct Manuscript {
 }
 
 /// The chapters in order, each under a level-one heading, with notes-to-self removed.
-pub fn manuscript(project: &Project, author: Option<&str>) -> Result<Manuscript> {
-    let mut markdown = format!("---\ntitle: \"{}\"\n", yaml_escape(&project.title()));
+pub fn manuscript(book: &Book, author: Option<&str>) -> Result<Manuscript> {
+    let mut markdown = format!("---\ntitle: \"{}\"\n", yaml_escape(&book.title()));
     if let Some(author) = author {
         markdown.push_str(&format!("author: \"{}\"\n", yaml_escape(author)));
     }
     markdown.push_str("---\n\n");
     let (mut chapters, mut words, mut skipped) = (0, 0, Vec::new());
-    for chapter in project.chapters()? {
+    for chapter in book.chapters()? {
         if chapter.words == 0 {
             skipped.push(chapter.note.name.clone());
             continue;

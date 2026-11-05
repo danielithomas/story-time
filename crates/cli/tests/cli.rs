@@ -56,15 +56,21 @@ fn a_project_from_idea_to_manuscript() {
             "--from-idea",
         ],
     );
-    assert!(new.contains("Created sample-story/"), "{new}");
+    assert!(new.contains("Created sample-story-world/"), "{new}");
     let ideas = fs::read_to_string(root.join("Scratchpad/Ideas.md")).unwrap();
     assert!(
-        ideas.contains("with a catch. → [[sample-story]]"),
+        ideas.contains("with a catch. → [[sample-story-world]]"),
         "{ideas}"
     );
-    let note = fs::read_to_string(root.join("sample-story/sample-story.md")).unwrap();
+    let book = root.join("sample-story-world/books/sample-story");
+    let note = fs::read_to_string(book.join("sample-story.md")).unwrap();
     assert!(note.contains("A premise, with a catch."));
-    let flow = fs::read_to_string(root.join("sample-story/sample-story-flow.md")).unwrap();
+    let world = fs::read_to_string(root.join("sample-story-world/sample-story-world.md")).unwrap();
+    assert!(
+        world.contains("## Books\n\n- [[sample-story|Sample Story]]\n"),
+        "{world}"
+    );
+    let flow = fs::read_to_string(book.join("sample-story-flow.md")).unwrap();
     assert!(
         flow.contains("### Catalyst\n\n*10% · around 9,000 words*"),
         "{flow}"
@@ -72,7 +78,7 @@ fn a_project_from_idea_to_manuscript() {
 
     ok(root, &["add", "chapter", "Arrival"]);
     ok(root, &["add", "character", "Mara Chen", "-p", "sample"]);
-    let chapter = root.join("sample-story/chapters/01-arrival.md");
+    let chapter = book.join("chapters/01-arrival.md");
     let text = fs::read_to_string(&chapter)
         .unwrap()
         .replace("synopsis:", "synopsis: Mara arrives.")
@@ -101,7 +107,7 @@ fn a_project_from_idea_to_manuscript() {
     let check = ok(root, &["check"]);
     assert!(check.contains("Nothing to report."), "{check}");
     fs::write(
-        root.join("sample-story/characters/Old Tom.md"),
+        root.join("sample-story-world/bible/characters/Old Tom.md"),
         "Linked as [[Mara Chen]].\n",
     )
     .unwrap();
@@ -114,10 +120,12 @@ fn a_project_from_idea_to_manuscript() {
         check.contains("characters/Old Tom.md") && check.contains("old-tom.md"),
         "{check}"
     );
-    fs::remove_file(root.join("sample-story/characters/Old Tom.md")).unwrap();
+    fs::remove_file(root.join("sample-story-world/bible/characters/Old Tom.md")).unwrap();
 
     ok(root, &["compile"]);
-    let manuscript = fs::read_to_string(root.join(".story-time/build/sample-story.md")).unwrap();
+    let manuscript =
+        fs::read_to_string(root.join(".story-time/build/sample-story-world/sample-story.md"))
+            .unwrap();
     assert!(
         manuscript.starts_with("---\ntitle: \"Sample Story\"\n---\n\n# Arrival\n"),
         "{manuscript}"
@@ -130,6 +138,28 @@ fn a_project_from_idea_to_manuscript() {
     assert_eq!(
         fs::read_to_string(root.join(".gitignore")).unwrap(),
         ".story-time/build/\n"
+    );
+
+    let sequel = ok(root, &["new", "Second Story", "--in", "sample"]);
+    assert!(
+        sequel.contains("Added Second Story to sample-story-world/"),
+        "{sequel}"
+    );
+    let which = run(root, &["outline"]);
+    assert!(
+        String::from_utf8_lossy(&which.stderr).contains("which book of Sample Story?"),
+        "a project with two books needs one named"
+    );
+    ok(root, &["add", "chapter", "Arrival", "-b", "second"]);
+    assert!(
+        root.join("sample-story-world/books/second-story/chapters/01-arrival.md")
+            .is_file()
+    );
+    let stats = ok(root, &["stats", "sample"]);
+    assert!(
+        stats.contains("Second Story")
+            && stats.contains("World bible of Sample Story: 1 character"),
+        "{stats}"
     );
 
     ok(root, &["idea", "Added:", "A", "new", "premise."]);
@@ -155,7 +185,7 @@ fn helpful_errors() {
     let missing_idea = run(root, &["new", "Missing", "--from-idea"]);
     assert!(String::from_utf8_lossy(&missing_idea.stderr).contains("no idea named \"Missing\""));
     assert!(
-        !root.join("missing").exists(),
+        !root.join("missing-world").exists(),
         "nothing is created when the idea is missing"
     );
     let bad_form = run(root, &["new", "X", "--form", "epic"]);

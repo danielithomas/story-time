@@ -3,17 +3,26 @@
     app,
     chooseVault,
     compile,
+    openNewBook,
     openNewProject,
+    selectBook,
     selectProject,
     toggleFocus,
     VIEWS,
   } from "../lib/store.svelte";
 
   let exportMenu = $state<HTMLDetailsElement>();
+  let newMenu = $state<HTMLDetailsElement>();
 
   function exportAs(format: string) {
     if (exportMenu) exportMenu.open = false;
     void compile(format);
+  }
+
+  function startNew(what: "book" | "project") {
+    if (newMenu) newMenu.open = false;
+    if (what === "book") openNewBook();
+    else openNewProject();
   }
 </script>
 
@@ -30,7 +39,29 @@
         {/each}
       </select>
     {/if}
-    <button class="btn ghost" onclick={() => openNewProject()}>+ New project</button>
+    {#if app.tree && app.tree.project.books.length > 1}
+      <span class="slash">/</span>
+      <select class="project" value={app.book} onchange={(e) => selectBook(e.currentTarget.value)}>
+        {#each app.tree.project.books as book (book.slug)}
+          <option value={book.slug}>{book.title}</option>
+        {/each}
+      </select>
+    {/if}
+    <details class="menu start" bind:this={newMenu}>
+      <summary class="btn ghost">+ New</summary>
+      <div class="menu-items">
+        {#if app.tree}
+          <button onclick={() => startNew("book")}>
+            <strong>Book in {app.tree.project.title}</strong>
+            <span>Shares this world's characters, places and world notes</span>
+          </button>
+        {/if}
+        <button onclick={() => startNew("project")}>
+          <strong>Project</strong>
+          <span>A new world, with its first book</span>
+        </button>
+      </div>
+    </details>
   </div>
 
   <nav>
@@ -161,6 +192,7 @@
   .menu-items {
     position: absolute;
     right: 0;
+    left: auto;
     top: calc(100% + 6px);
     z-index: 10;
     width: 18rem;
@@ -169,6 +201,11 @@
     border: 1px solid var(--line);
     border-radius: 8px;
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  }
+
+  .menu.start .menu-items {
+    right: auto;
+    left: 0;
   }
 
   .menu-items button {

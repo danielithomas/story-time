@@ -1,5 +1,5 @@
-//! Story-bible checks: gaps between what the chapters mention and what the notes document, links
-//! Obsidian can't follow, and file names that break the naming rules.
+//! World-bible checks: gaps between what a project's chapters mention and what its notes document,
+//! links Obsidian can't follow, and file names that break the naming rules.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -15,7 +15,7 @@ use crate::text::{contains_word, is_slug, slug_matches, slugify, strip_leading_n
 use crate::vault::Vault;
 use crate::words::prose;
 
-/// The story bible: every kind of note except chapters.
+/// The world bible: every kind of note except chapters.
 pub const BIBLE: [NoteKind; 3] = [NoteKind::Character, NoteKind::Location, NoteKind::World];
 
 /// Link targets, and the notes (by file name) that link to them.
@@ -62,24 +62,28 @@ impl Report {
 
 pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
     let index = LinkIndex::build(vault)?;
-    let chapters = project.chapters()?;
+    let books = project.books()?;
+    let mut chapters = Vec::new();
+    let mut planning = Vec::new();
+    for book in &books {
+        chapters.extend(book.chapters()?);
+        planning.push(book.note.clone());
+        let flow = book.flow_path();
+        if flow.is_file() {
+            planning.push(Note::load(&flow)?);
+        }
+    }
     let mut bible = Vec::new();
     for kind in BIBLE {
         bible.extend(project.notes(kind)?.into_iter().map(|note| (kind, note)));
     }
-    let flow = project.flow_path();
-    let flow = if flow.is_file() {
-        Some(Note::load(&flow)?)
-    } else {
-        None
-    };
 
     let mut report = Report::default();
     let notes = chapters
         .iter()
         .map(|c| &c.note)
         .chain([&project.note])
-        .chain(flow.iter())
+        .chain(planning.iter())
         .chain(bible.iter().map(|(_, note)| note));
     for note in notes {
         if let Some(error) = &note.frontmatter_error {
@@ -143,6 +147,7 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
         .iter()
         .map(|c| (Some(NoteKind::Chapter), &c.note))
         .chain([(None, &project.note)])
+        .chain(books.iter().map(|book| (None, &book.note)))
         .chain(bible.iter().map(|(kind, note)| (Some(*kind), note)));
     for (kind, note) in all_notes {
         if let Some(name) = drifted(note, kind, project) {
@@ -266,7 +271,7 @@ fn drifted(note: &Note, kind: Option<NoteKind>, project: &Project) -> Option<Str
 mod tests {
     use super::*;
     use crate::project::Form;
-    use crate::scaffold::{NewProject, add_note, create_project};
+    use crate::scaffold::{NewBook, NewProject, add_note, create_project};
     use crate::structures::FREEFORM;
     use chrono::NaiveDate;
     use std::fs;
@@ -279,31 +284,49 @@ mod tests {
         let vault = Vault::open(dir.path()).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
         let spec = NewProject {
-            title: "Other Story",
-            form: Form::ShortStory,
-            target: None,
-            structure: &FREEFORM,
-            premise: None,
+            world: None,
+            book: NewBook {
+                title: "Other Story",
+                form: Form::ShortStory,
+                target: None,
+                structure: &FREEFORM,
+                premise: None,
+            },
         };
-        let project = create_project(&vault, &spec, today).unwrap();
+        let (project, book) = create_project(&vault, &spec, today).unwrap();
         for (kind, name) in [
             (NoteKind::Character, "Ada Okafor"),
             (NoteKind::Character, "Old Tom"),
             (NoteKind::Location, "The Array"),
             (NoteKind::World, "Orbital Mechanics"),
         ] {
-            add_note(&vault, &project, kind, name, today).unwrap();
+            add_note(&vault, &project, None, kind, name, today).unwrap();
         }
         let ada = project.folder(NoteKind::Character).join("ada-okafor.md");
         let text = fs::read_to_string(&ada)
             .unwrap()
             .replace("  - \"Ada Okafor\"\n", "  - \"Ada Okafor\"\n  - Ada\n");
         fs::write(&ada, text).unwrap();
-        let chapter = add_note(&vault, &project, NoteKind::Chapter, "Signal", today)
-            .unwrap()
-            .path;
+        let chapter = add_note(
+            &vault,
+            &project,
+            Some(&book),
+            NoteKind::Chapter,
+            "Signal",
+            today,
+        )
+        .unwrap()
+        .path;
         fs::write(&chapter, "---\nstatus: draft\nsynopsis: Ada hears it.\n---\nAda walked to [[the-array|The Array]] to meet [[Captain Reyes]] at [[Orbital Mechanics]].\n").unwrap();
-        add_note(&vault, &project, NoteKind::Chapter, "Empty", today).unwrap();
+        add_note(
+            &vault,
+            &project,
+            Some(&book),
+            NoteKind::Chapter,
+            "Empty",
+            today,
+        )
+        .unwrap();
 
         let report = check(&vault, &project).unwrap();
         assert_eq!(
@@ -325,9 +348,16 @@ mod tests {
         assert!(report.misnamed.is_empty() && report.drifted.is_empty());
         assert!(!report.is_clean());
 
-        let pov = add_note(&vault, &project, NoteKind::Chapter, "Tom's View", today)
-            .unwrap()
-            .path;
+        let pov = add_note(
+            &vault,
+            &project,
+            Some(&book),
+            NoteKind::Chapter,
+            "Tom's View",
+            today,
+        )
+        .unwrap()
+        .path;
         fs::write(
             &pov,
             "---\npov: \"[[old-tom|Old Tom]]\"\n---\nThe array hummed.\n",
@@ -347,20 +377,38 @@ mod tests {
         let vault = Vault::open(dir.path()).unwrap();
         let today = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
         let spec = |title| NewProject {
-            title,
-            form: Form::ShortStory,
-            target: None,
-            structure: &FREEFORM,
-            premise: None,
+            world: None,
+            book: NewBook {
+                title,
+                form: Form::ShortStory,
+                target: None,
+                structure: &FREEFORM,
+                premise: None,
+            },
         };
-        let project = create_project(&vault, &spec("Sample Story"), today).unwrap();
-        let other = create_project(&vault, &spec("Other Story"), today).unwrap();
+        let (project, book) = create_project(&vault, &spec("Sample Story"), today).unwrap();
+        let (other, _) = create_project(&vault, &spec("Other Story"), today).unwrap();
         for project in [&project, &other] {
-            add_note(&vault, project, NoteKind::Character, "Ada Okafor", today).unwrap();
+            add_note(
+                &vault,
+                project,
+                None,
+                NoteKind::Character,
+                "Ada Okafor",
+                today,
+            )
+            .unwrap();
         }
-        let chapter = add_note(&vault, &project, NoteKind::Chapter, "Signal", today)
-            .unwrap()
-            .path;
+        let chapter = add_note(
+            &vault,
+            &project,
+            Some(&book),
+            NoteKind::Chapter,
+            "Signal",
+            today,
+        )
+        .unwrap()
+        .path;
         fs::write(&chapter, "Ada and [[ada-okafor|her]] sister.\n").unwrap();
         let characters = project.folder(NoteKind::Character);
         fs::write(

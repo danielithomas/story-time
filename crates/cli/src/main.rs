@@ -12,6 +12,7 @@ use chrono::Local;
 use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{Parser, Subcommand};
 use story_time_core::compile::Format;
+use story_time_core::scaffold::NewBook;
 use story_time_core::structures::STRUCTURES;
 use story_time_core::{Form, NoteKind, Vault};
 
@@ -41,11 +42,17 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Start a project: a folder with a project note, a story flow, and chapters/, characters/,
-    /// locations/ and world/.
+    /// Start a book: in a new project (a world, with its world bible), or with --in, in an
+    /// existing one.
     New {
-        /// The story's title; the folder is named after it ("Sample Story" → sample-story).
+        /// The book's title; its folder is named after it ("Sample Story" → sample-story).
         title: String,
+        /// Name the new project's world, if it isn't the book's title.
+        #[arg(long, conflicts_with = "in_project")]
+        world: Option<String>,
+        /// Add the book to this existing project (slug or title) instead of starting a new one.
+        #[arg(long = "in", value_name = "PROJECT")]
+        in_project: Option<String>,
         #[arg(long, default_value = "novel", value_parser = form_values())]
         form: String,
         /// Target length in words. Defaults to a typical length for the form.
@@ -56,10 +63,10 @@ enum Command {
         structure: String,
         /// Copy the premise from the idea with this name in the ideas file (default: the title),
         /// and link the idea to the new project. Put this after the title.
-        #[arg(long, value_name = "IDEA")]
+        #[arg(long, value_name = "IDEA", conflicts_with = "in_project")]
         from_idea: Option<Option<String>>,
     },
-    /// Add a chapter, character, location or world note to a project.
+    /// Add a chapter to a book, or a character, location or world note to a project's world bible.
     Add {
         #[arg(value_parser = kind_values())]
         kind: String,
@@ -68,11 +75,19 @@ enum Command {
         /// Project slug or title (default: the project you are in, or the only one).
         #[arg(short, long)]
         project: Option<String>,
+        /// For a chapter, the book (default: the book you are in, or the project's only one).
+        #[arg(short, long)]
+        book: Option<String>,
     },
-    /// Word counts and progress for all projects, or chapter by chapter for one.
+    /// Word counts and progress for every book, or chapter by chapter for one project's books.
     Stats { project: Option<String> },
     /// Each chapter's status, point of view and synopsis, in order: a corkboard for the terminal.
-    Outline { project: Option<String> },
+    Outline {
+        project: Option<String>,
+        /// The book (default: the book you are in, or the project's only one).
+        #[arg(short, long)]
+        book: Option<String>,
+    },
     /// Words written today against your daily goal, and your writing streak.
     Today,
     /// Words written per day.
@@ -91,15 +106,18 @@ enum Command {
         #[arg(long)]
         non_fiction: bool,
     },
-    /// Find story-bible gaps: links to notes that don't exist yet, notes that never appear on the
+    /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, and chapters missing a status or synopsis.
     Check { project: Option<String> },
-    /// Stitch the chapters into one manuscript.
+    /// Stitch a book's chapters into one manuscript.
     Compile {
         project: Option<String>,
+        /// The book (default: the book you are in, or the project's only one).
+        #[arg(short, long)]
+        book: Option<String>,
         #[arg(long, default_value = "md", value_parser = format_values())]
         format: String,
-        /// Where to write it (default: .story-time/build/<project>.<format> in the vault).
+        /// Where to write it (default: .story-time/build/<project>/<book>.<format> in the vault).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -156,6 +174,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Init { .. } => unreachable!("handled above"),
         Command::New {
             title,
+            world,
+            in_project,
             form,
             target,
             structure,
@@ -164,21 +184,42 @@ fn run(cli: Cli) -> Result<()> {
             let form = Form::from_key(&form).expect("validated form");
             let structure =
                 story_time_core::structures::find(&structure).expect("validated structure");
-            commands::new(&vault, &title, form, target, structure, from_idea, now)
+            let book = NewBook {
+                title: &title,
+                form,
+                target,
+                structure,
+                premise: None,
+            };
+            match in_project {
+                Some(project) => commands::new_book(&vault, &cwd, &project, &book, now),
+                None => commands::new(&vault, world.as_deref(), &book, from_idea, now),
+            }
         }
         Command::Add {
             kind,
             name,
             project,
+            book,
         } => {
             let kind = NoteKind::from_key(&kind).expect("validated kind");
-            commands::add(&vault, &cwd, kind, &name, project.as_deref(), now)
+            commands::add(
+                &vault,
+                &cwd,
+                kind,
+                &name,
+                project.as_deref(),
+                book.as_deref(),
+                now,
+            )
         }
         Command::Stats { project: None } => commands::stats_all(&vault, now),
         Command::Stats {
             project: Some(project),
         } => commands::stats_project(&vault, &cwd, &project, now),
-        Command::Outline { project } => commands::outline(&vault, &cwd, project.as_deref()),
+        Command::Outline { project, book } => {
+            commands::outline(&vault, &cwd, project.as_deref(), book.as_deref())
+        }
         Command::Today => commands::today(&vault, now),
         Command::History { days } => commands::history(&vault, days, now),
         Command::Snapshot => vault.snapshot(now).map(drop),
@@ -186,11 +227,19 @@ fn run(cli: Cli) -> Result<()> {
         Command::Check { project } => commands::check(&vault, &cwd, project.as_deref()),
         Command::Compile {
             project,
+            book,
             format,
             output,
         } => {
             let format = Format::from_key(&format).expect("validated format");
-            commands::compile(&vault, &cwd, project.as_deref(), format, output)
+            commands::compile(
+                &vault,
+                &cwd,
+                project.as_deref(),
+                book.as_deref(),
+                format,
+                output,
+            )
         }
     }
 }

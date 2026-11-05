@@ -54,8 +54,8 @@
 
 <div class="view">
   <header>
-    <h1>Story bible check</h1>
-    <p class="muted">Gaps between what the chapters mention and what the notes document.</p>
+    <h1>World bible check</h1>
+    <p class="muted">Gaps between what this world's chapters mention and what its notes document.</p>
     <button class="btn" onclick={run}>Check again</button>
   </header>
 

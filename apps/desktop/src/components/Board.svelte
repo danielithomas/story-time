@@ -18,19 +18,19 @@
   }
 </script>
 
-{#if app.tree}
-  {@const tree = app.tree}
+{#if app.tree?.book}
+  {@const book = app.tree.book}
   <div class="view">
     <header>
-      <h1>{tree.project.title}</h1>
+      <h1>{book.summary.title}</h1>
       <p class="muted">
-        {plural(tree.chapters.length, "chapter")} · {plural(tree.project.words, "word")}. Each card shows a chapter's
+        {plural(book.chapters.length, "chapter")} · {plural(book.summary.words, "word")}. Each card shows a chapter's
         synopsis; set it in the inspector while writing.
       </p>
     </header>
 
     <div class="cards">
-      {#each tree.chapters as chapter (chapter.path)}
+      {#each book.chapters as chapter (chapter.path)}
         <button class="card" onclick={() => openNote(chapter.path)}>
           <div class="row">
             <span class="number">{chapterNumber(chapter.number)}</span>
