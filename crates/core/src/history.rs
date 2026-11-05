@@ -1,9 +1,13 @@
 //! The writing log: word-count snapshots in `.story-time/history.csv`, and what they add up to.
 //!
-//! A snapshot is taken whenever a command measures the vault, and only for projects whose count
-//! changed. Words written on a day are the net change between snapshots, so words written on a
-//! day when nothing was measured count towards the next day that is. The file lives in the vault,
-//! so it is backed up and synced with everything else.
+//! A snapshot is taken whenever a command measures the vault, and only for what changed. Each
+//! row is keyed by the project's ID, or by its folder name for projects created before IDs, so a
+//! renamed project keeps its history. Words written on a day are the net change between
+//! snapshots, so words written on a day when nothing was measured count towards the next day that
+//! is. The file lives in the vault, so it is backed up and synced with everything else.
+//!
+//! Logs started before IDs have the header `timestamp,project,words`. Rows are read by position,
+//! so those logs read the same.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, OpenOptions};
@@ -13,13 +17,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, NaiveDateTime};
 
-const HEADER: &str = "timestamp,project,words";
+const HEADER: &str = "timestamp,id,words";
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
     pub at: NaiveDateTime,
-    pub project: String,
+    /// What was measured, as [`crate::project::Project::log_key`] gives it.
+    pub key: String,
     pub words: u64,
 }
 
@@ -41,16 +46,16 @@ impl History {
         Ok(History { snapshots })
     }
 
-    pub fn latest(&self, project: &str) -> Option<u64> {
+    pub fn latest(&self, key: &str) -> Option<u64> {
         self.snapshots
             .iter()
             .rev()
-            .find(|s| s.project == project)
+            .find(|s| s.key == key)
             .map(|s| s.words)
     }
 
-    /// Appends a snapshot for each project whose count differs from its last one, and returns
-    /// how many were written.
+    /// Appends a snapshot for each key whose count differs from its last one, and returns how
+    /// many were written.
     pub fn record(
         &mut self,
         path: &Path,
@@ -79,7 +84,7 @@ impl History {
             lines.push_str(&format!(
                 "{},{},{}\n",
                 snapshot.at.format(TIME_FORMAT),
-                snapshot.project,
+                snapshot.key,
                 snapshot.words
             ));
         }
@@ -101,23 +106,23 @@ impl History {
     fn changes(&self, at: NaiveDateTime, counts: &[(String, u64)]) -> Vec<Snapshot> {
         counts
             .iter()
-            .filter(|(project, words)| self.latest(project) != Some(*words))
-            .map(|(project, words)| Snapshot {
+            .filter(|(key, words)| self.latest(key) != Some(*words))
+            .map(|(key, words)| Snapshot {
                 at,
-                project: project.clone(),
+                key: key.clone(),
                 words: *words,
             })
             .collect()
     }
 
-    /// Net words written per day, for one project or all. A project's first snapshot is its
-    /// starting point, not words written.
-    pub fn daily(&self, project: Option<&str>) -> BTreeMap<NaiveDate, i64> {
+    /// Net words written per day, for one key or all. A key's first snapshot is its starting
+    /// point, not words written.
+    pub fn daily(&self, key: Option<&str>) -> BTreeMap<NaiveDate, i64> {
         let mut last: HashMap<&str, u64> = HashMap::new();
         let mut days = BTreeMap::new();
         for snapshot in &self.snapshots {
-            let previous = last.insert(&snapshot.project, snapshot.words);
-            if project.is_some_and(|p| p != snapshot.project) {
+            let previous = last.insert(&snapshot.key, snapshot.words);
+            if key.is_some_and(|k| k != snapshot.key) {
                 continue;
             }
             let change = previous.map_or(0, |previous| snapshot.words as i64 - previous as i64);
@@ -126,8 +131,8 @@ impl History {
         days
     }
 
-    pub fn written_on(&self, day: NaiveDate, project: Option<&str>) -> i64 {
-        self.daily(project).get(&day).copied().unwrap_or(0)
+    pub fn written_on(&self, day: NaiveDate, key: Option<&str>) -> i64 {
+        self.daily(key).get(&day).copied().unwrap_or(0)
     }
 
     /// Consecutive days with words written, ending today, or yesterday if today has none yet.
@@ -154,9 +159,9 @@ impl History {
 fn parse_line(line: &str) -> Option<Snapshot> {
     let mut fields = line.trim().splitn(3, ',');
     let at = NaiveDateTime::parse_from_str(fields.next()?, TIME_FORMAT).ok()?;
-    let project = fields.next()?.to_string();
+    let key = fields.next()?.to_string();
     let words = fields.next()?.parse().ok()?;
-    Some(Snapshot { at, project, words })
+    Some(Snapshot { at, key, words })
 }
 
 #[cfg(test)]
@@ -201,11 +206,34 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert_eq!(
             text,
-            "timestamp,project,words\n2026-10-28T09:00:00,alpha,1000\n2026-10-28T09:00:00,beta,0\n2026-10-28T21:00:00,alpha,1500\n"
+            "timestamp,id,words\n2026-10-28T09:00:00,alpha,1000\n2026-10-28T09:00:00,beta,0\n2026-10-28T21:00:00,alpha,1500\n"
         );
         let reloaded = History::load(&path).unwrap();
         assert_eq!(reloaded.latest("alpha"), Some(1500));
         assert_eq!(reloaded.written_on(at(28, 0).date(), None), 500);
+    }
+
+    #[test]
+    fn reads_logs_started_before_ids() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("history.csv");
+        fs::write(
+            &path,
+            "timestamp,project,words\n2026-10-28T09:00:00,sample-story,1000\n2026-10-28T21:00:00,sample-story,1400\n",
+        )
+        .unwrap();
+        let mut history = History::load(&path).unwrap();
+        assert_eq!(history.latest("sample-story"), Some(1400));
+        assert_eq!(history.written_on(at(28, 0).date(), None), 400);
+        history
+            .record(&path, at(29, 9), &counts(&[("k3x9q2mw", 1500)]))
+            .unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("timestamp,project,words\n"),
+            "the log is appended to, never rewritten"
+        );
+        assert!(text.ends_with("2026-10-29T09:00:00,k3x9q2mw,1500\n"));
     }
 
     #[test]

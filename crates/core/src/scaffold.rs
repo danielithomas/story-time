@@ -1,5 +1,6 @@
 //! Creating things: a vault's setup, new projects, and new notes within a project.
 
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,8 @@ use chrono::{NaiveDate, NaiveDateTime};
 use crate::config::{CONFIG_FILE, Config, DEFAULT_CONFIG, META_DIR};
 use crate::history::History;
 use crate::ideas;
+use crate::ids;
+use crate::note::{PropertyValue, set_properties};
 use crate::project::{Form, NoteKind, Project};
 use crate::structures::{self, Structure};
 use crate::templates::{self, render};
@@ -19,6 +22,10 @@ use crate::vault::Vault;
 /// The line `init` adds to the vault's `.gitignore`: compiled manuscripts are rebuilt on demand.
 pub const BUILD_IGNORE: &str = ".story-time/build/";
 
+/// The line `init` adds to the vault's `.gitattributes`: when two machines both add to the
+/// writing log, git keeps both sets of lines instead of reporting a conflict.
+pub const LOG_MERGE: &str = ".story-time/history.csv merge=union";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
     Created(PathBuf),
@@ -26,14 +33,16 @@ pub enum Step {
     Kept(PathBuf),
 }
 
-/// Sets up a vault: config, note templates, the folder for Obsidian's Templates plugin, and a
-/// `.gitignore` entry for compiled output. Existing files are kept unless `overwrite_templates`
-/// is set, which replaces only the templates.
+/// Sets up a vault: config, note templates, the folder for Obsidian's Templates plugin and, in a
+/// git repository, `.gitignore` and `.gitattributes` entries. Existing files are kept unless
+/// `overwrite_templates` is set, which replaces only the templates. A vault in a newer format is
+/// left untouched.
 pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
     let mut steps = Vec::new();
     let config_path = root.join(META_DIR).join(CONFIG_FILE);
     steps.push(write_if_missing(&config_path, DEFAULT_CONFIG)?);
     let config = Config::load(root)?;
+    config.ensure_supported()?;
 
     let templates_dir = root.join(&config.templates_dir);
     for template in templates::ALL {
@@ -59,26 +68,30 @@ pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
     }
 
     if root.join(".git").exists() {
-        let path = root.join(".gitignore");
-        let existing = fs::read_to_string(&path).unwrap_or_default();
-        if existing.lines().any(|line| line.trim() == BUILD_IGNORE) {
-            steps.push(Step::Kept(path));
-        } else {
-            let separator = if existing.is_empty() || existing.ends_with('\n') {
-                ""
-            } else {
-                "\n"
-            };
-            fs::write(&path, format!("{existing}{separator}{BUILD_IGNORE}\n"))
-                .with_context(|| format!("writing {}", path.display()))?;
-            steps.push(if existing.is_empty() {
-                Step::Created(path)
-            } else {
-                Step::Updated(path)
-            });
-        }
+        steps.push(add_line(&root.join(".gitignore"), BUILD_IGNORE)?);
+        steps.push(add_line(&root.join(".gitattributes"), LOG_MERGE)?);
     }
     Ok(steps)
+}
+
+/// Adds `line` to the end of a file unless the file already has it.
+fn add_line(path: &Path, line: &str) -> Result<Step> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    if existing.lines().any(|existing| existing.trim() == line) {
+        return Ok(Step::Kept(path.to_path_buf()));
+    }
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
+    fs::write(path, format!("{existing}{separator}{line}\n"))
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(if existing.is_empty() {
+        Step::Created(path.to_path_buf())
+    } else {
+        Step::Updated(path.to_path_buf())
+    })
 }
 
 fn write_if_missing(path: &Path, content: &str) -> Result<Step> {
@@ -113,7 +126,8 @@ pub struct NewProject<'a> {
     pub premise: Option<&'a str>,
 }
 
-/// Creates `<slug>/` with the project note, the story flow and the four note folders.
+/// Creates `<slug>/` with the project note, the story flow and the four note folders. The project
+/// note gets a new permanent ID, even from a vault template that doesn't ask for one.
 pub fn create_project(vault: &Vault, spec: &NewProject, today: NaiveDate) -> Result<Project> {
     let slug = slugify(spec.title);
     if slug.is_empty() {
@@ -133,7 +147,10 @@ pub fn create_project(vault: &Vault, spec: &NewProject, today: NaiveDate) -> Res
         .to_string();
     let date = today.format("%Y-%m-%d").to_string();
     let structure = structures::render(spec.structure, target.parse().ok());
+    let taken: HashSet<String> = vault.projects()?.iter().filter_map(Project::id).collect();
+    let id = ids::new_id(&taken)?;
     let vars = [
+        ("id", id.as_str()),
         ("title", spec.title),
         ("project", spec.title),
         ("slug", slug.as_str()),
@@ -145,9 +162,10 @@ pub fn create_project(vault: &Vault, spec: &NewProject, today: NaiveDate) -> Res
         ("structure", structure.as_str()),
         ("structure_name", spec.structure.key),
     ];
+    let note = render(&templates::PROJECT.load(vault)?, &vars);
     write_new(
         &dir.join(format!("{slug}.md")),
-        &render(&templates::PROJECT.load(vault)?, &vars),
+        &set_properties(&note, &[("id", PropertyValue::Text(id.clone()))]),
     )?;
     write_new(
         &dir.join(format!("{slug}-flow.md")),
@@ -190,7 +208,7 @@ pub fn start_project(
     };
     let project = create_project(vault, &spec, now.date())?;
     let history_path = vault.history_path();
-    History::load(&history_path)?.record(&history_path, now, &[(project.slug.clone(), 0)])?;
+    History::load(&history_path)?.record(&history_path, now, &[(project.log_key(), 0)])?;
     if let Some((content, idea)) = &found {
         fs::write(
             &ideas_path,
@@ -283,11 +301,29 @@ mod tests {
             fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
             ".story-time/build/\n"
         );
+        assert_eq!(
+            fs::read_to_string(dir.path().join(".gitattributes")).unwrap(),
+            ".story-time/history.csv merge=union\n"
+        );
         let second = init_vault(dir.path(), false).unwrap();
         assert!(
             second.iter().all(|step| matches!(step, Step::Kept(_))),
             "{second:?}"
         );
+    }
+
+    #[test]
+    fn init_leaves_newer_vaults_alone() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(META_DIR)).unwrap();
+        fs::write(
+            dir.path().join(META_DIR).join(CONFIG_FILE),
+            format!("format = {}\n", crate::config::FORMAT + 1),
+        )
+        .unwrap();
+        assert!(init_vault(dir.path(), false).is_err());
+        assert!(!dir.path().join("Templates").exists());
+        assert!(Vault::open(dir.path()).is_err());
     }
 
     #[test]
@@ -303,6 +339,8 @@ mod tests {
         let project = create_project(&vault, &spec, today()).unwrap();
         assert_eq!(project.slug, "sample-story");
         assert_eq!(project.title(), "Sample Story");
+        let id = project.id().expect("a new project has an ID");
+        assert_eq!(project.log_key(), id);
         assert_eq!(project.target(), Some(90_000));
         assert_eq!(project.form(), Some(Form::Novel));
         assert!(project.note.body.contains("A premise, with a catch."));
@@ -363,5 +401,47 @@ mod tests {
             fs::read_to_string(place.path).unwrap(),
             "---\ntype: location\n---\n# The Lab in Other Story\n"
         );
+    }
+
+    #[test]
+    fn projects_get_ids_even_from_templates_without_one() {
+        let (dir, vault) = vault();
+        fs::create_dir_all(dir.path().join("Templates")).unwrap();
+        fs::write(
+            dir.path().join("Templates/Project.md"),
+            "---\ntype: project\ntitle: \"{{title}}\"\n---\n# {{title}}\n",
+        )
+        .unwrap();
+        let spec = NewProject {
+            title: "Sample Story",
+            form: Form::Novel,
+            target: None,
+            structure: &THREE_ACT,
+            premise: None,
+        };
+        let now = today().and_hms_opt(9, 0, 0).unwrap();
+        let project = start_project(&vault, &spec, None, now).unwrap();
+        let id = project
+            .id()
+            .expect("the ID is added to the template's properties");
+        let log = fs::read_to_string(vault.history_path()).unwrap();
+        assert_eq!(
+            log,
+            format!("timestamp,id,words\n2026-10-30T09:00:00,{id},0\n")
+        );
+    }
+
+    #[test]
+    fn projects_from_before_ids_are_logged_by_folder_name() {
+        let (dir, vault) = vault();
+        fs::create_dir_all(dir.path().join("old-story")).unwrap();
+        fs::write(
+            dir.path().join("old-story/old-story.md"),
+            "---\ntype: project\ntitle: Old Story\n---\n",
+        )
+        .unwrap();
+        let project = vault.find_project(Some("old-story"), dir.path()).unwrap();
+        assert_eq!(project.id(), None);
+        assert_eq!(project.log_key(), "old-story");
     }
 }

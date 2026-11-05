@@ -28,6 +28,7 @@ impl Vault {
             bail!("{} is not a folder", root.display());
         }
         let config = Config::load(&root)?;
+        config.ensure_supported()?;
         Ok(Vault { root, config })
     }
 
@@ -198,11 +199,11 @@ pub struct Measured {
     pub words: u64,
 }
 
-/// Word counts by project slug, as the writing log records them.
+/// Word counts by project, keyed as the writing log records them.
 pub fn counts(measured: &[Measured]) -> Vec<(String, u64)> {
     measured
         .iter()
-        .map(|m| (m.project.slug.clone(), m.words))
+        .map(|m| (m.project.log_key(), m.words))
         .collect()
 }
 

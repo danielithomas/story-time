@@ -640,7 +640,7 @@ pub async fn project_progress(
         }
     }
 
-    let daily = history.daily(Some(&project.slug));
+    let daily = history.daily(Some(&project.log_key()));
     let history_days = (0..u64::from(days))
         .rev()
         .filter_map(|back| today.checked_sub_days(Days::new(back)))
@@ -659,7 +659,7 @@ pub async fn project_progress(
         reading_minutes: words.div_ceil(vault.config.reading_wpm.max(1)),
         days_left,
         words_per_day,
-        today: history.written_on(today, Some(&project.slug)),
+        today: history.written_on(today, Some(&project.log_key())),
         goal: vault.config.daily_goal,
         statuses,
         characters: count(NoteKind::Character)?,

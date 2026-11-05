@@ -3,12 +3,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 /// Folder inside the vault for story-time's own files. Obsidian ignores dot-folders.
 pub const META_DIR: &str = ".story-time";
 pub const CONFIG_FILE: &str = "config.toml";
+
+/// The newest vault format this build understands (docs/vault-format.md). A vault without a
+/// `format` setting uses the unversioned layout, format 0.
+pub const FORMAT: u32 = 0;
 
 /// The config file written by `story-time init`; it documents every setting.
 pub const DEFAULT_CONFIG: &str = r#"# story-time settings for this vault.
@@ -38,6 +42,7 @@ templates_dir = "Templates"
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub format: u32,
     pub daily_goal: u64,
     pub words_per_page: u64,
     pub reading_wpm: u64,
@@ -50,6 +55,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            format: 0,
             daily_goal: 500,
             words_per_page: 250,
             reading_wpm: 250,
@@ -71,6 +77,19 @@ impl Config {
         let text =
             fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    /// Fails for a vault in a newer format than this build understands, so nothing misreads or
+    /// edits it.
+    pub fn ensure_supported(&self) -> Result<()> {
+        if self.format > FORMAT {
+            bail!(
+                "this vault uses format {}, which is newer than this version of story-time \
+                 understands (up to format {FORMAT}). Update story-time to open it.",
+                self.format
+            );
+        }
+        Ok(())
     }
 }
 
@@ -144,5 +163,18 @@ mod tests {
         assert_eq!(parsed.daily_goal, 1000);
         assert_eq!(parsed.author.as_deref(), Some("A. Writer"));
         assert_eq!(parsed.words_per_page, 250);
+        assert_eq!(
+            parsed.format, 0,
+            "no format setting means the unversioned layout"
+        );
+    }
+
+    #[test]
+    fn refuses_newer_formats() {
+        let current: Config = toml::from_str(&format!("format = {FORMAT}")).unwrap();
+        assert!(current.ensure_supported().is_ok());
+        let newer: Config = toml::from_str(&format!("format = {}", FORMAT + 1)).unwrap();
+        let message = newer.ensure_supported().unwrap_err().to_string();
+        assert!(message.contains("newer"), "{message}");
     }
 }

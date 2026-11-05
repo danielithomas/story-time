@@ -1,5 +1,6 @@
 ---
 type: project
+id: {{id}}
 title: "{{title}}"
 status: planning
 form: {{form}}

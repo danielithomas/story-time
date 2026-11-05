@@ -90,7 +90,7 @@ Every note story-time manages has a `type`. Properties are flat, and each name h
 | Property | Type | Meaning |
 |---|---|---|
 | `type` | text | The note kind, as in the table above. |
-| `id` | text | Eight random lower-case letters and digits, such as `k3x9q2mw`. Written when the note is created and never changed, so the writing log survives a rename (#7). |
+| `id` | text | Eight random lower-case letters and digits, starting with a letter so YAML never reads one as a number, such as `k3x9q2mw`. Written when the note is created and never changed, so the writing log survives a rename (#7). |
 | `title` | text | The project's or book's name, used on title pages. |
 | `aliases` | list | The note's name first, then any other names it goes by. `check` looks for all of them in the prose. |
 | `genre` | list | Free text, such as `space opera`. |

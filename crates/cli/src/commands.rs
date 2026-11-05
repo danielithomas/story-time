@@ -263,7 +263,7 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
     }
     println!(
         "  Today        {} words",
-        signed(history.written_on(now.date(), Some(&project.slug)))
+        signed(history.written_on(now.date(), Some(&project.log_key())))
     );
     let bible = BIBLE
         .iter()
@@ -341,7 +341,7 @@ pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     );
     let mut table = Table::new(&[("", Align::Left), ("", Align::Right)]);
     for Measured { project, .. } in &measured {
-        let words = history.written_on(day, Some(&project.slug));
+        let words = history.written_on(day, Some(&project.log_key()));
         if words != 0 {
             table.row(vec![project.title(), signed(words)]);
         }

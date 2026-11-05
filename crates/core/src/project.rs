@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use chrono::NaiveDate;
 
+use crate::ids;
 use crate::note::Note;
 use crate::text::{leading_number, natural_cmp, strip_leading_number};
 use crate::vault::markdown_files;
@@ -180,6 +181,20 @@ impl Project {
 
     pub fn title(&self) -> String {
         self.note.title()
+    }
+
+    /// The permanent ID written when the project was created, if it has a usable one.
+    pub fn id(&self) -> Option<String> {
+        self.note
+            .frontmatter
+            .str("id")
+            .filter(|id| ids::is_valid(id))
+    }
+
+    /// What the writing log records this project's words under: its ID, or its folder name if
+    /// it was created before projects had IDs.
+    pub fn log_key(&self) -> String {
+        self.id().unwrap_or_else(|| self.slug.clone())
     }
 
     pub fn status(&self) -> Option<String> {

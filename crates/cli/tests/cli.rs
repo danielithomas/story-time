@@ -154,3 +154,19 @@ fn helpful_errors() {
         "{overview}"
     );
 }
+
+#[test]
+fn refuses_a_vault_in_a_newer_format() {
+    let dir = vault();
+    let root = dir.path();
+    fs::create_dir(root.join(".story-time")).unwrap();
+    fs::write(root.join(".story-time/config.toml"), "format = 99\n").unwrap();
+    for args in [&["stats"][..], &["init"][..]] {
+        let output = run(root, args);
+        assert!(!output.status.success(), "{args:?} should fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("format 99"), "{stderr}");
+        assert!(stderr.contains("Update story-time"), "{stderr}");
+    }
+    assert!(!root.join("Templates").exists(), "nothing was written");
+}

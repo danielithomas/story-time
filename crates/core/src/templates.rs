@@ -2,8 +2,9 @@
 //! built-in versions, so a template edited in Obsidian changes what story-time creates too.
 //!
 //! Obsidian's Templates plugin fills `{{title}}`, `{{date}}` and `{{time}}`. story-time fills those
-//! plus `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`,
-//! `{{structure}}` and `{{structure_name}}`, and leaves any other placeholder as it is.
+//! plus `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`,
+//! `{{premise}}`, `{{structure}}` and `{{structure_name}}`, and leaves any other placeholder as it
+//! is.
 
 use std::fs;
 use std::sync::LazyLock;

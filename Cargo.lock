@@ -3361,6 +3361,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "getrandom 0.4.3",
  "regex",
  "serde",
  "tempfile",

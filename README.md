@@ -43,7 +43,7 @@ Option 4 makes every command work from any directory, which helps if the vault m
 
 | Command | What it does |
 |---|---|
-| `init [--force]` | Writes `.story-time/config.toml`, the note templates in `Templates/`, `.obsidian/templates.json` (pointing Obsidian's Templates plugin at that folder) and, in a git repository, a `.gitignore` entry for compiled output. Existing files are kept; `--force` replaces only the templates. |
+| `init [--force]` | Writes `.story-time/config.toml`, the note templates in `Templates/`, `.obsidian/templates.json` (pointing Obsidian's Templates plugin at that folder) and, in a git repository, a `.gitignore` entry for compiled output and a `.gitattributes` entry so git merges the writing log from two machines instead of reporting a conflict. Existing files are kept; `--force` replaces only the templates. |
 | `new "Title" [--form F] [--target N] [--structure S] [--from-idea [NAME]]` | Creates `<slug>/` with the project note, the story flow and the four folders. `--structure` lays out the flow note with beats and the word count each lands at (`three-act`, `save-the-cat`, `heros-journey`, `story-circle`, `kishotenketsu`, `freeform`). `--from-idea` copies the premise from the ideas file and appends `→ [[slug]]` to that idea. Nothing in the ideas file is removed or reworded. |
 | `add chapter\|character\|location\|world "Name" [-p project]` | Creates a note from its template. Chapters are numbered after the highest existing number. |
 | `stats [project]` | All projects: status, form, chapters, words, progress to target. One project: chapter table, progress, deadline pacing, length category, manuscript pages and reading time, words today, story-bible size. |
@@ -65,6 +65,7 @@ Without a project argument, commands other than `stats` use the project folder y
 
 | Note | Property | Meaning |
 |---|---|---|
+| project | `id` | written once when the project is created and never changed; the writing log records the project by it |
 | project | `title`, `status`, `form`, `genre` | shown in `stats` |
 | project | `target` | target words; `90000` or `"90,000"` |
 | project | `deadline` | `YYYY-MM-DD`; `stats` works out the words a day needed |
@@ -76,9 +77,11 @@ Without a project argument, commands other than `stats` use the project folder y
 
 **Word counts** cover the prose a reader would read. They leave out properties, headings (chapter and scene titles), `%% Obsidian comments %%`, `<!-- HTML comments -->`, callouts such as `> [!todo]`, code blocks and embeds. Links count as the text they display. Hyphenated words count once; words joined by an em dash count separately.
 
-**Templates** in the vault's `Templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the Project or Story Flow template by hand.
+**Templates** in the vault's `Templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{project_slug}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the Project or Story Flow template by hand.
 
-**The writing log** is `.story-time/history.csv`. Each time `stats`, `today`, `history` or `snapshot` runs, it appends a line for every project whose count changed. Words written on a day are the net change from the previous snapshot, so deleting words counts against the day. If you write without running a command, those words count toward the next day you do. To log every day, schedule a snapshot:
+**The vault format.** `docs/vault-format.md` specifies the next version of this layout, which isn't implemented yet. story-time refuses to open a vault whose `.story-time/config.toml` has a `format` newer than it understands, rather than misread or change it.
+
+**The writing log** is `.story-time/history.csv`. Each time `stats`, `today`, `history` or `snapshot` runs, it appends a line for every project whose count changed, recorded under the project's `id` so renaming the project keeps its history. (Projects created before IDs are recorded under their folder name.) Words written on a day are the net change from the previous snapshot, so deleting words counts against the day. If you write without running a command, those words count toward the next day you do. To log every day, schedule a snapshot:
 
 ```cron
 55 23 * * * $HOME/.cargo/bin/story-time --vault $HOME/stories snapshot
