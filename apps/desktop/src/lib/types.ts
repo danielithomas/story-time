@@ -83,7 +83,13 @@ export interface PartRef {
   chapters: ChapterRef[];
 }
 
-/** A project's notes, with one of its books open. */
+/** A note in a scratchpad. Its title is its name, or the first words of its text. */
+export interface ScrapRef extends NoteRef {
+  created: string | null;
+  words: number;
+}
+
+/** A project's notes, with one of its books open, and the vault's scratchpad and research. */
 export interface ProjectTree {
   project: ProjectSummary;
   projectNote: NoteRef;
@@ -91,6 +97,11 @@ export interface ProjectTree {
   characters: NoteRef[];
   locations: NoteRef[];
   world: NoteRef[];
+  timeline: NoteRef | null;
+  research: NoteRef[];
+  scratchpad: ScrapRef[];
+  vaultResearch: NoteRef[];
+  vaultScratchpad: ScrapRef[];
 }
 
 /** A book's notes, with its scenes as its contents list them. */
@@ -105,7 +116,18 @@ export interface BookTree {
 
 export type PropertyValue = string | string[];
 
-export type NoteKind = "project" | "book" | "flow" | "scene" | "character" | "location" | "world" | "note";
+export type NoteKind =
+  | "project"
+  | "book"
+  | "flow"
+  | "scene"
+  | "character"
+  | "location"
+  | "world"
+  | "timeline"
+  | "research"
+  | "scrap"
+  | "note";
 
 export interface NoteDoc {
   path: string;

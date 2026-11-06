@@ -12,8 +12,8 @@ fn vault() -> TempDir {
     let dir = TempDir::new().unwrap();
     fs::create_dir(dir.path().join(".obsidian")).unwrap();
     fs::create_dir(dir.path().join(".git")).unwrap();
-    fs::create_dir(dir.path().join("Scratchpad")).unwrap();
-    fs::write(dir.path().join("Scratchpad/Ideas.md"), IDEAS).unwrap();
+    fs::create_dir(dir.path().join("scratchpad")).unwrap();
+    fs::write(dir.path().join("scratchpad/ideas.md"), IDEAS).unwrap();
     dir
 }
 
@@ -57,9 +57,9 @@ fn a_project_from_idea_to_manuscript() {
         ],
     );
     assert!(new.contains("Created sample-story-world/"), "{new}");
-    let ideas = fs::read_to_string(root.join("Scratchpad/Ideas.md")).unwrap();
+    let ideas = fs::read_to_string(root.join("scratchpad/ideas.md")).unwrap();
     assert!(
-        ideas.contains("with a catch. → [[sample-story-world]]"),
+        ideas.contains("with a catch. → [[sample-story-world|Sample Story]]"),
         "{ideas}"
     );
     let book = root.join("sample-story-world/books/sample-story");
@@ -193,10 +193,103 @@ fn a_project_from_idea_to_manuscript() {
     );
 
     ok(root, &["idea", "Added:", "A", "new", "premise."]);
-    let ideas = fs::read_to_string(root.join("Scratchpad/Ideas.md")).unwrap();
+    let ideas = fs::read_to_string(root.join("scratchpad/ideas.md")).unwrap();
     assert!(
         ideas.contains("1. Other Story: Another premise.\n1. Added: A new premise.\n"),
         "{ideas}"
+    );
+}
+
+#[test]
+fn scratchpads_and_research() {
+    let dir = vault();
+    let root = dir.path();
+    ok(root, &["new", "Sample Story"]);
+    ok(root, &["snapshot"]);
+
+    let scrap = ok(
+        root,
+        &[
+            "scrap",
+            "add",
+            "Four",
+            "words",
+            "kept",
+            "here.",
+            "--source",
+            "dictation",
+        ],
+    );
+    let path = scrap.trim().strip_prefix("Created ").unwrap();
+    assert!(path.starts_with("scratchpad/"), "{scrap}");
+    let note = fs::read_to_string(root.join(path)).unwrap();
+    assert!(
+        note.ends_with("source: dictation\n---\nFour words kept here.\n"),
+        "{note}"
+    );
+
+    let piped = Command::new(env!("CARGO_BIN_EXE_story-time"))
+        .args(["scrap", "add", "-", "-p", "sample"])
+        .current_dir(root)
+        .env_remove("STORY_TIME_VAULT")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"Two lines\nexactly.\n")?;
+            child.wait_with_output()
+        })
+        .unwrap();
+    assert!(piped.status.success());
+    let path = String::from_utf8_lossy(&piped.stdout);
+    let path = path.trim().strip_prefix("Created ").unwrap();
+    assert!(path.starts_with("sample-story-world/scratchpad/"), "{path}");
+    assert!(
+        fs::read_to_string(root.join(path))
+            .unwrap()
+            .ends_with("---\nTwo lines\nexactly.\n")
+    );
+
+    let today = ok(root, &["today"]);
+    assert!(
+        today.contains("Scratchpad") && today.contains("+4"),
+        "{today}"
+    );
+    assert!(
+        today.contains("Sample Story scratchpad") && today.contains("+3"),
+        "{today}"
+    );
+
+    let research = ok(
+        root,
+        &[
+            "research",
+            "add",
+            "Orbits",
+            "-p",
+            "sample",
+            "--source",
+            "https://example.com",
+            "--agent",
+        ],
+    );
+    assert!(
+        research.contains("Created sample-story-world/research/orbits.md"),
+        "{research}"
+    );
+    let note = fs::read_to_string(root.join("sample-story-world/research/orbits.md")).unwrap();
+    assert!(note.contains("source: https://example.com\n"), "{note}");
+    assert!(note.contains("> [!note] Added by an agent"), "{note}");
+
+    let stats = ok(root, &["stats", "sample"]);
+    assert!(
+        stats.contains("Scratchpad: 1 note, 3 words · Research: 1 note"),
+        "{stats}"
     );
 }
 

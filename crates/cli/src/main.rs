@@ -13,7 +13,7 @@ use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{Parser, Subcommand};
 use story_time_core::compile::Format;
 use story_time_core::contents::Place;
-use story_time_core::scaffold::NewBook;
+use story_time_core::scaffold::{NewBook, NewResearch};
 use story_time_core::structures::STRUCTURES;
 use story_time_core::{Form, NoteKind, Vault};
 
@@ -115,6 +115,17 @@ enum Command {
         #[arg(long)]
         non_fiction: bool,
     },
+    /// Keep a fragment in a scratchpad: the vault's, or with --project, a world's. Scratchpad
+    /// words count towards the daily goal but towards no book.
+    Scrap {
+        #[command(subcommand)]
+        action: ScrapAction,
+    },
+    /// Keep research: what is true in the real world, with its source. Research isn't counted.
+    Research {
+        #[command(subcommand)]
+        action: ResearchAction,
+    },
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
     Check { project: Option<String> },
@@ -129,6 +140,45 @@ enum Command {
         /// Where to write it (default: .story-time/build/<project>/<book>.<format> in the vault).
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ScrapAction {
+    /// Capture a note, named by the time of capture. Its text is kept exactly as given.
+    Add {
+        /// The text, or - to read it from standard input.
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+        /// Put it in this project's scratchpad (slug or title) instead of the vault's.
+        #[arg(short, long)]
+        project: Option<String>,
+        /// Where it came from, such as `dictation`.
+        #[arg(long)]
+        source: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ResearchAction {
+    /// Add a research note named after its subject.
+    Add {
+        /// What it is about: the note's name.
+        name: String,
+        /// Put it in this project's research (slug or title) instead of the vault's.
+        #[arg(short, long)]
+        project: Option<String>,
+        /// Where it came from: a URL or citation.
+        #[arg(long)]
+        source: Option<String>,
+        /// What it says, or - to read it from standard input. Without it, the note starts from
+        /// the template.
+        #[arg(long)]
+        text: Option<String>,
+        /// An agent wrote it: the note opens with a callout asking the writer to check it against
+        /// its source.
+        #[arg(long)]
+        agent: bool,
     },
 }
 
@@ -241,6 +291,43 @@ fn run(cli: Cli) -> Result<()> {
         Command::History { days } => commands::history(&vault, days, now),
         Command::Snapshot => vault.snapshot(now).map(drop),
         Command::Idea { text, non_fiction } => commands::idea(&vault, &text.join(" "), non_fiction),
+        Command::Scrap {
+            action:
+                ScrapAction::Add {
+                    text,
+                    project,
+                    source,
+                },
+        } => commands::scrap_add(
+            &vault,
+            &cwd,
+            &text.join(" "),
+            project.as_deref(),
+            source.as_deref(),
+            now,
+        ),
+        Command::Research {
+            action:
+                ResearchAction::Add {
+                    name,
+                    project,
+                    source,
+                    text,
+                    agent,
+                },
+        } => commands::research_add(
+            &vault,
+            &cwd,
+            project.as_deref(),
+            &NewResearch {
+                name: &name,
+                source: source.as_deref(),
+                text: None,
+                by_agent: agent,
+            },
+            text.as_deref(),
+            now,
+        ),
         Command::Check { project } => commands::check(&vault, &cwd, project.as_deref()),
         Command::Compile {
             project,

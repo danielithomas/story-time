@@ -1,7 +1,7 @@
 <script lang="ts">
   import { formatNumber } from "../lib/format";
-  import { addNote, addScene, app, openNote } from "../lib/store.svelte";
-  import type { BibleKind, NoteRef, ScenePlace, SceneRef } from "../lib/types";
+  import { addNote, addResearch, addScene, addScrap, app, openNote } from "../lib/store.svelte";
+  import type { BibleKind, NoteRef, ScenePlace, SceneRef, ScrapRef } from "../lib/types";
 
   const bible: { kind: BibleKind; label: string; notes: () => NoteRef[] }[] = [
     { kind: "character", label: "Characters", notes: () => app.tree?.characters ?? [] },
@@ -15,7 +15,13 @@
     world: "What it is",
   };
 
-  /** What is being added, as a key: a world-bible kind, or where a new scene goes. */
+  /** Research and scratchpads: the open world's, then those not tied to any world. */
+  const notebooks = [
+    { inProject: true, label: "Research", scratchpad: "Scratchpad", hint: "this world" },
+    { inProject: false, label: "General research", scratchpad: "General scratchpad", hint: "no world in particular" },
+  ];
+
+  /** What is being added, as a key: a world-bible kind, research, or where a new scene goes. */
   let adding = $state<string | null>(null);
   let name = $state("");
 
@@ -34,6 +40,7 @@
     if (!key || !value) return;
     if (key === "end" || key === "unplaced") await addScene(value, key);
     else if (key.startsWith("chapter:")) await addScene(value, { chapter: Number(key.slice(8)) });
+    else if (key.startsWith("research:")) await addResearch(key === "research:project", value);
     else await addNote(key as BibleKind, value);
   }
 
@@ -72,6 +79,18 @@
     <span class="dot" data-status={scene.status ?? ""}></span>
     <span class="title">{scene.title}</span>
     <span class="count">{formatNumber(scene.words)}</span>
+  </button>
+{/snippet}
+
+{#snippet scrap(scrap: ScrapRef)}
+  <button
+    class="item"
+    class:active={isOpen(scrap.path)}
+    title={scrap.created ? `Kept ${scrap.created}` : ""}
+    onclick={() => openNote(scrap.path)}
+  >
+    <span class="title">{scrap.title}</span>
+    <span class="count">{formatNumber(scrap.words)}</span>
   </button>
 {/snippet}
 
@@ -143,6 +162,10 @@
       <button class="item" class:active={isOpen(tree.projectNote.path)} onclick={() => openNote(tree.projectNote.path)}>
         {tree.project.title}
       </button>
+      {#if tree.timeline}
+        {@const timeline = tree.timeline}
+        <button class="item" class:active={isOpen(timeline.path)} onclick={() => openNote(timeline.path)}>Timeline</button>
+      {/if}
     </section>
 
     {#each bible as group (group.kind)}
@@ -158,6 +181,42 @@
           </button>
         {:else}
           <p class="empty">None yet</p>
+        {/each}
+      </section>
+    {/each}
+
+    {#each notebooks as notebook (notebook.label)}
+      {@const key = `research:${notebook.inProject ? "project" : "vault"}`}
+      {@const research = notebook.inProject ? tree.research : tree.vaultResearch}
+      {@const scraps = notebook.inProject ? tree.scratchpad : tree.vaultScratchpad}
+      <section>
+        <h3 title="What's true in the real world, for {notebook.hint}">
+          {notebook.label}
+          <button class="add" title="Add a research note" onclick={() => start(key)}>+</button>
+        </h3>
+        {@render addForm(key, "What it's about")}
+        {#each research as note (note.path)}
+          <button class="item" class:active={isOpen(note.path)} onclick={() => openNote(note.path)}>
+            <span class="title">{note.title}</span>
+          </button>
+        {:else}
+          <p class="empty">None yet</p>
+        {/each}
+      </section>
+      <section>
+        <h3 title="Fragments kept until they're useful, for {notebook.hint}">
+          {notebook.scratchpad}
+          <button class="add" title="Keep a new fragment" onclick={() => addScrap(notebook.inProject)}>+</button>
+        </h3>
+        {#if !notebook.inProject}
+          <button class="item" class:active={app.view === "ideas"} onclick={() => (app.view = "ideas")}>Ideas</button>
+        {/if}
+        {#each scraps as s (s.path)}
+          {@render scrap(s)}
+        {:else}
+          {#if notebook.inProject}
+            <p class="empty">None yet</p>
+          {/if}
         {/each}
       </section>
     {/each}

@@ -1,5 +1,6 @@
 //! One function per subcommand: call into the core, then print for a person to read.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -9,7 +10,8 @@ use story_time_core::compile::{self, Format};
 use story_time_core::contents::Place;
 use story_time_core::history::History;
 use story_time_core::ideas;
-use story_time_core::scaffold::{self, NewBook, NewProject, Step};
+use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
+use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
@@ -56,11 +58,11 @@ pub fn new(
     let slug = &project.slug;
     println!("Created {slug}/");
     println!("  {slug}.md  the project note: the world and its books, in order");
-    println!("  bible/  characters/, locations/ and world/, shared by every book");
+    println!("  bible/  characters/, locations/, world/ and the timeline, shared by every book");
     print_book(&created, book);
     if idea.is_some() {
         println!(
-            "\nCopied the premise from {} and linked the idea to [[{slug}]].",
+            "\nCopied the premise from {} and linked the idea to the project.",
             vault.relative(&vault.ideas_path()).display()
         );
     }
@@ -236,6 +238,14 @@ pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime)
         "\n  World bible of {}: {}",
         project.title(),
         bible.join(" · ")
+    );
+    let scratchpad = Scratchpad::of_project(&project)?;
+    let research = scratchpad::research(&project.research_dir())?;
+    println!(
+        "  Scratchpad: {}, {} · Research: {}",
+        plural(scratchpad.notes.len() as u64, "note", "notes"),
+        plural(scratchpad.words, "word", "words"),
+        plural(research.len() as u64, "note", "notes"),
     );
     Ok(())
 }
@@ -460,10 +470,15 @@ pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
         },
     );
     let mut table = Table::new(&[("", Align::Left), ("", Align::Right)]);
-    for Measured { book, .. } in &measured {
-        let words = history.written_on(day, Some(&book.log_key()));
+    let books = measured.iter().map(|m| (m.book.title(), m.book.log_key()));
+    let scratchpads = vault
+        .scratchpads()?
+        .into_iter()
+        .map(|scratchpad| (scratchpad.title(), scratchpad.log_key()));
+    for (title, key) in books.chain(scratchpads) {
+        let words = history.written_on(day, Some(&key));
         if words != 0 {
-            table.row(vec![book.title(), signed(words)]);
+            table.row(vec![title, signed(words)]);
         }
     }
     table.print(4);
@@ -523,6 +538,61 @@ pub fn history(vault: &Vault, days: u32, now: NaiveDateTime) -> Result<()> {
         thousands(best),
         thousands(goal),
     );
+    Ok(())
+}
+
+/// `-` means the text comes from standard input.
+fn text_or_stdin(text: &str) -> Result<String> {
+    if text != "-" {
+        return Ok(text.to_string());
+    }
+    io::read_to_string(io::stdin()).context("reading standard input")
+}
+
+pub fn scrap_add(
+    vault: &Vault,
+    cwd: &Path,
+    text: &str,
+    project: Option<&str>,
+    source: Option<&str>,
+    now: NaiveDateTime,
+) -> Result<()> {
+    let text = text_or_stdin(text)?;
+    if text.trim().is_empty() {
+        bail!("there is no text to keep");
+    }
+    let project = project
+        .map(|query| vault.find_project(Some(query), cwd))
+        .transpose()?;
+    let added = scaffold::add_scrap(vault, project.as_ref(), &text, source, now)?;
+    println!("Created {}", vault.relative(&added.path).display());
+    Ok(())
+}
+
+pub fn research_add(
+    vault: &Vault,
+    cwd: &Path,
+    project: Option<&str>,
+    research: &NewResearch,
+    text: Option<&str>,
+    now: NaiveDateTime,
+) -> Result<()> {
+    let text = text.map(text_or_stdin).transpose()?;
+    let project = project
+        .map(|query| vault.find_project(Some(query), cwd))
+        .transpose()?;
+    let research = NewResearch {
+        text: text.as_deref(),
+        ..*research
+    };
+    let added = scaffold::add_research(vault, project.as_ref(), &research, now.date())?;
+    println!("Created {}", vault.relative(&added.path).display());
+    if let Some(other) = added.same_name {
+        eprintln!(
+            "Note: {} has the same name, so Obsidian links to that name may go to either note.",
+            vault.relative(&other).display()
+        );
+    }
     Ok(())
 }
 

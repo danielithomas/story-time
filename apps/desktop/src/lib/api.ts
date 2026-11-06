@@ -55,6 +55,8 @@ export const api = {
       chapter: typeof place === "object" ? place.chapter : null,
       unplaced: place === "unplaced",
     }),
+  addScrap: (slug: string | null) => invoke<AddedNote>("add_scrap", { slug }),
+  addResearch: (slug: string | null, name: string) => invoke<AddedNote>("add_research", { slug, name }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),
   writingToday: () => invoke<TodayInfo>("writing_today"),
   recordSnapshot: () => invoke<void>("record_snapshot"),

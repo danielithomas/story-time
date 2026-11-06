@@ -42,11 +42,21 @@ function type(text: string) {
 async function snapshotTour(dir: string) {
   const scenes = bookScenes(app.tree);
   const unplaced = app.tree?.book?.unplaced[0];
+  const scrap = app.tree?.scratchpad[0] ?? app.tree?.vaultScratchpad[0];
+  const research = app.tree?.research[0] ?? app.tree?.vaultResearch[0];
   const shots: [string, () => unknown][] = [
     ["write", () => (app.view = "write")],
     ["scene", () => scenes[0] && openNote(scenes[0].path)],
     ["typed", () => type("\n\nSnapshot tour sentence with eight words in it.\n")],
     ["unplaced", () => unplaced && openNote(unplaced.path)],
+    [
+      "scrap",
+      async () => {
+        if (scrap) await openNote(scrap.path);
+        document.querySelector(".binder")?.scrollTo(0, 1e6);
+      },
+    ],
+    ["research", () => research && openNote(research.path)],
     ["conflict", () => (app.saveState = "conflict")],
     [
       "board",

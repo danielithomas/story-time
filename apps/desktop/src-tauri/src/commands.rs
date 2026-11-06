@@ -15,11 +15,14 @@ use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::links::LinkIndex;
 use story_time_core::note::{self, Note, PropertyValue, Saved};
-use story_time_core::project::{BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, SCENE_STATUSES};
-use story_time_core::scaffold::{self, NewBook, NewProject};
+use story_time_core::project::{
+    BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, RESEARCH_DIR, SCENE_STATUSES, SCRATCHPAD_DIR,
+};
+use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
+use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::structures::{self, STRUCTURES};
 use story_time_core::text::thousands;
-use story_time_core::vault::{self as vaults, Measured};
+use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Project, Scene, Vault, check, config, words};
 use tauri::{State, WebviewWindow};
 
@@ -230,7 +233,29 @@ pub struct ChapterRef {
     words: u64,
 }
 
-/// A project's notes, with one of its books open.
+/// A note in a scratchpad.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrapRef {
+    path: String,
+    name: String,
+    /// Its name, or the first words of its text.
+    title: String,
+    created: Option<String>,
+    words: usize,
+}
+
+fn scrap_ref(note: &Note) -> ScrapRef {
+    ScrapRef {
+        path: note.path.display().to_string(),
+        name: note.name.clone(),
+        title: scratchpad::label(note),
+        created: note.frontmatter.str("created"),
+        words: note.words(),
+    }
+}
+
+/// A project's notes, with one of its books open, and the vault's scratchpad and research.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectTree {
@@ -240,6 +265,11 @@ pub struct ProjectTree {
     characters: Vec<NoteRef>,
     locations: Vec<NoteRef>,
     world: Vec<NoteRef>,
+    timeline: Option<NoteRef>,
+    research: Vec<NoteRef>,
+    scratchpad: Vec<ScrapRef>,
+    vault_research: Vec<NoteRef>,
+    vault_scratchpad: Vec<ScrapRef>,
 }
 
 /// A book's notes, with its scenes as its contents list them.
@@ -299,7 +329,7 @@ fn book_tree(book: &Book) -> CmdResult<BookTree> {
 pub struct NoteDoc {
     path: String,
     name: String,
-    /// project, book, flow, scene, character, location, world or note.
+    /// project, book, flow, scene, character, location, world, timeline, research, scrap or note.
     kind: String,
     project: Option<String>,
     book: Option<String>,
@@ -354,6 +384,15 @@ fn note_path(vault: &Vault, path: &str) -> CmdResult<PathBuf> {
 
 /// What a note is, from where it sits in the vault, and the project and book it belongs to.
 fn classify(vault: &Vault, path: &Path) -> (String, Option<String>, Option<String>) {
+    if path == vault.ideas_path() {
+        return ("note".to_string(), None, None);
+    }
+    if path.starts_with(vault.scratchpad_dir()) {
+        return ("scrap".to_string(), None, None);
+    }
+    if path.starts_with(vault.research_dir()) {
+        return ("research".to_string(), None, None);
+    }
     let parts: Vec<String> = vault
         .relative(path)
         .components()
@@ -361,6 +400,11 @@ fn classify(vault: &Vault, path: &Path) -> (String, Option<String>, Option<Strin
         .collect();
     let kind = match parts.as_slice() {
         [slug, file] if *file == format!("{slug}.md") => "project",
+        [slug, bible, file] if bible == BIBLE_DIR && *file == format!("{slug}-timeline.md") => {
+            "timeline"
+        }
+        [_, folder, _, ..] if folder == SCRATCHPAD_DIR => "scrap",
+        [_, folder, _, ..] if folder == RESEARCH_DIR => "research",
         [_, books, book, file] if books == BOOKS_DIR && *file == format!("{book}.md") => "book",
         [_, books, book, file] if books == BOOKS_DIR && *file == format!("{book}-flow.md") => {
             "flow"
@@ -522,7 +566,7 @@ pub async fn project_tree(
     book: Option<String>,
     state: State<'_, AppState>,
 ) -> CmdResult<ProjectTree> {
-    let (_, project) = state.project(&slug)?;
+    let (vault, project) = state.project(&slug)?;
     let books = project.books().or_message()?;
     let open = match book {
         Some(book) => books.iter().find(|b| b.slug == book).or(books.first()),
@@ -537,6 +581,20 @@ pub async fn project_tree(
             .map(note_ref)
             .collect())
     };
+    let research = |dir: &Path| -> CmdResult<Vec<NoteRef>> {
+        Ok(scratchpad::research(dir)
+            .or_message()?
+            .iter()
+            .map(note_ref)
+            .collect())
+    };
+    let scraps = |scratchpad: Scratchpad| scratchpad.notes.iter().map(scrap_ref).collect();
+    let timeline = project.timeline_path();
+    let timeline = if timeline.is_file() {
+        Some(note_ref(&Note::load(&timeline).or_message()?))
+    } else {
+        None
+    };
     Ok(ProjectTree {
         project: project_summary(&project)?,
         project_note: note_ref(&project.note),
@@ -544,6 +602,11 @@ pub async fn project_tree(
         characters: refs(NoteKind::Character)?,
         locations: refs(NoteKind::Location)?,
         world: refs(NoteKind::World)?,
+        timeline,
+        research: research(&project.research_dir())?,
+        scratchpad: scraps(Scratchpad::of_project(&project).or_message()?),
+        vault_research: research(&vault.research_dir())?,
+        vault_scratchpad: scraps(Scratchpad::of_vault(&vault).or_message()?),
     })
 }
 
@@ -554,13 +617,18 @@ pub async fn read_note(path: String, state: State<'_, AppState>) -> CmdResult<No
     let content = fs::read_to_string(&path).or_message()?;
     let note = Note::parse(&path, &content);
     let (kind, project, book) = classify(&vault, &path);
+    let title = if kind == "scrap" {
+        scratchpad::label(&note)
+    } else {
+        note.title()
+    };
     Ok(NoteDoc {
         path: path.display().to_string(),
         name: note.name.clone(),
         kind,
         project,
         book,
-        title: note.title(),
+        title,
         properties: properties_json(&note),
         hash: note::content_hash(&content),
         words: note.words(),
@@ -742,6 +810,56 @@ pub async fn add_scene(
     added_note(&vault, added)
 }
 
+/// The project with this slug, or `None` for the vault itself.
+fn owner(state: &AppState, slug: Option<&str>) -> CmdResult<(Vault, Option<Project>)> {
+    match slug {
+        Some(slug) => {
+            let (vault, project) = state.project(slug)?;
+            Ok((vault, Some(project)))
+        }
+        None => Ok((state.vault()?, None)),
+    }
+}
+
+/// Adds an empty scrap to a project's scratchpad, or with no project, the vault's.
+#[tauri::command]
+pub async fn add_scrap(slug: Option<String>, state: State<'_, AppState>) -> CmdResult<AddedNote> {
+    let (vault, project) = owner(&state, slug.as_deref())?;
+    let added = scaffold::add_scrap(
+        &vault,
+        project.as_ref(),
+        "",
+        None,
+        Local::now().naive_local(),
+    )
+    .or_message()?;
+    added_note(&vault, added)
+}
+
+/// Adds a research note to a project, or with no project, to the vault.
+#[tauri::command]
+pub async fn add_research(
+    slug: Option<String>,
+    name: String,
+    state: State<'_, AppState>,
+) -> CmdResult<AddedNote> {
+    let (vault, project) = owner(&state, slug.as_deref())?;
+    let research = NewResearch {
+        name: &name,
+        source: None,
+        text: None,
+        by_agent: false,
+    };
+    let added = scaffold::add_research(
+        &vault,
+        project.as_ref(),
+        &research,
+        Local::now().date_naive(),
+    )
+    .or_message()?;
+    added_note(&vault, added)
+}
+
 /// A link from one note to another that both Story Time and Obsidian follow.
 #[tauri::command]
 pub async fn link_for(from: String, to: String, state: State<'_, AppState>) -> CmdResult<String> {
@@ -769,7 +887,7 @@ pub async fn writing_today(state: State<'_, AppState>) -> CmdResult<TodayInfo> {
     let measured = vault.measure().or_message()?;
     let history = History::load(&vault.history_path())
         .or_message()?
-        .preview(now, &vaults::counts(&measured));
+        .preview(now, &vault.counts(&measured).or_message()?);
     Ok(TodayInfo {
         words: history.written_on(now.date(), None),
         goal: vault.config.daily_goal,
@@ -839,7 +957,7 @@ pub async fn book_progress(
     let measured = vault.measure().or_message()?;
     let history = History::load(&vault.history_path())
         .or_message()?
-        .preview(now, &vaults::counts(&measured));
+        .preview(now, &vault.counts(&measured).or_message()?);
     let Measured {
         project,
         book,

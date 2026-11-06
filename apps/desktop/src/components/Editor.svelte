@@ -26,14 +26,18 @@
     character: "Characters",
     location: "Locations",
     world: "World",
+    timeline: "Timeline",
+    research: "Research",
+    scrap: "Scratchpad",
   };
 
   const trail = $derived.by(() => {
     const doc = app.doc;
     if (!doc) return "";
     const section = doc.kind === "scene" ? app.tree?.book?.summary.title : kindLabels[doc.kind];
-    const parts = [app.tree?.project.title, section];
-    if (doc.kind !== "project" && doc.kind !== "flow") parts.push(doc.title);
+    // Notes outside any project, such as the general scratchpad, have no world to name.
+    const parts = [doc.project ? app.tree?.project.title : null, section];
+    if (!["project", "flow", "timeline"].includes(doc.kind)) parts.push(doc.title);
     return parts.filter(Boolean).join("  ›  ");
   });
 </script>

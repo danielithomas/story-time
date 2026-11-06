@@ -26,7 +26,10 @@ words_per_page = 250
 reading_wpm = 250
 
 # Where `story-time idea` captures ideas, relative to the vault.
-ideas_file = "Scratchpad/Ideas.md"
+ideas_file = "scratchpad/ideas.md"
+
+# The vault's scratchpad: fragments not tied to any world (`story-time scrap add`).
+scratchpad = "scratchpad"
 
 # Note templates, shared with Obsidian's core Templates plugin.
 templates_dir = "templates"
@@ -47,6 +50,7 @@ pub struct Config {
     pub words_per_page: u64,
     pub reading_wpm: u64,
     pub ideas_file: String,
+    pub scratchpad: String,
     pub templates_dir: String,
     pub author: Option<String>,
     pub spelling: Option<Vec<String>>,
@@ -59,7 +63,8 @@ impl Default for Config {
             daily_goal: 500,
             words_per_page: 250,
             reading_wpm: 250,
-            ideas_file: "Scratchpad/Ideas.md".to_string(),
+            ideas_file: "scratchpad/ideas.md".to_string(),
+            scratchpad: "scratchpad".to_string(),
             templates_dir: "templates".to_string(),
             author: None,
             spelling: None,

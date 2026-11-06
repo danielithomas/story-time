@@ -3,8 +3,8 @@
 //!
 //! Obsidian's Templates plugin fills `{{title}}`, `{{date}}` and `{{time}}`. story-time fills those
 //! plus `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`,
-//! `{{flow_link}}`, `{{structure}}` and `{{structure_name}}`, and leaves any other placeholder as it
-//! is.
+//! `{{flow_link}}`, `{{timeline_link}}`, `{{structure}}` and `{{structure_name}}`, and leaves any
+//! other placeholder as it is.
 
 use std::fs;
 use std::sync::LazyLock;
@@ -50,9 +50,21 @@ pub const WORLD: Template = Template {
     file_name: "world.md",
     default: include_str!("../templates/world.md"),
 };
+pub const TIMELINE: Template = Template {
+    file_name: "timeline.md",
+    default: include_str!("../templates/timeline.md"),
+};
+pub const RESEARCH: Template = Template {
+    file_name: "research.md",
+    default: include_str!("../templates/research.md"),
+};
+pub const SCRAP: Template = Template {
+    file_name: "scrap.md",
+    default: include_str!("../templates/scrap.md"),
+};
 
-pub const ALL: [&Template; 7] = [
-    &PROJECT, &BOOK, &FLOW, &SCENE, &CHARACTER, &LOCATION, &WORLD,
+pub const ALL: [&Template; 10] = [
+    &PROJECT, &BOOK, &FLOW, &SCENE, &CHARACTER, &LOCATION, &WORLD, &TIMELINE, &RESEARCH, &SCRAP,
 ];
 
 pub fn for_kind(kind: NoteKind) -> &'static Template {
@@ -127,7 +139,6 @@ mod tests {
         let vars = [
             ("title", "Sample: of \"Stories\""),
             ("project", "Sample"),
-            ("project_slug", "sample"),
             ("slug", "sample"),
             ("form", "novel"),
             ("target", "90000"),

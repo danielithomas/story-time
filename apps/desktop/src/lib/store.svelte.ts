@@ -174,6 +174,11 @@ export function allNotes(tree: ProjectTree): NoteRef[] {
     ...tree.characters,
     ...tree.locations,
     ...tree.world,
+    ...(tree.timeline ? [tree.timeline] : []),
+    ...tree.research,
+    ...tree.scratchpad,
+    ...tree.vaultResearch,
+    ...tree.vaultScratchpad,
   ];
 }
 
@@ -271,6 +276,18 @@ export async function addScene(name: string, place: ScenePlace) {
   if (!app.slug) return;
   const [slug, book] = [app.slug, app.book];
   await added(() => api.addScene(slug, book, name, place));
+}
+
+/** Adds an empty scrap to the open project's scratchpad, or the vault's, and opens it. */
+export async function addScrap(inProject: boolean) {
+  const slug = inProject ? app.slug : null;
+  await added(() => api.addScrap(slug));
+}
+
+/** Adds a research note to the open project, or the vault. */
+export async function addResearch(inProject: boolean, name: string) {
+  const slug = inProject ? app.slug : null;
+  await added(() => api.addResearch(slug, name));
 }
 
 async function added(add: () => Promise<{ path: string; name: string; sameName: string | null }>) {

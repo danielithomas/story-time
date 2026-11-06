@@ -15,10 +15,11 @@ use crate::ideas;
 use crate::ids;
 use crate::links::LinkIndex;
 use crate::note::{
-    Note, PropertyValue, Saved, content_hash, save_section, section, set_properties,
+    Note, PropertyValue, Saved, content_hash, replace_body, save_section, section, set_properties,
     split_frontmatter,
 };
 use crate::project::{BIBLE_DIR, BOOKS_HEADING, Book, Form, NoteKind, Project, RESERVED};
+use crate::scratchpad;
 use crate::structures::{self, Structure};
 use crate::templates::{self, render};
 use crate::text::{slugify, unique_slug};
@@ -140,9 +141,9 @@ pub struct NewProject<'a> {
     pub book: NewBook<'a>,
 }
 
-/// Creates a project: `<slug>/` with the project note and the world bible's folders, and its
-/// first book in `books/`. The project is named after the world; when that would give it the same
-/// name as its book, the project gets a `-world` suffix (`sample-story-world/`).
+/// Creates a project: `<slug>/` with the project note, the world bible's folders and timeline, and
+/// its first book in `books/`. The project is named after the world; when that would give it the
+/// same name as its book, the project gets a `-world` suffix (`sample-story-world/`).
 pub fn create_project(
     vault: &Vault,
     spec: &NewProject,
@@ -176,15 +177,24 @@ pub fn create_project(
     let id = ids::new_id(&taken)?;
     taken.insert(id.clone());
     let date = today.format("%Y-%m-%d").to_string();
+    let note_path = dir.join(format!("{slug}.md"));
+    let timeline_path = dir.join(BIBLE_DIR).join(format!("{slug}-timeline.md"));
+    let timeline_link = LinkIndex::build(vault)?.link(&note_path, &timeline_path, "Timeline");
     let vars = [
         ("id", id.as_str()),
         ("title", world),
+        ("project", world),
         ("date", date.as_str()),
+        ("timeline_link", timeline_link.as_str()),
     ];
     let note = render(&templates::PROJECT.load(vault)?, &vars);
     write_new(
-        &dir.join(format!("{slug}.md")),
-        &set_properties(&note, &[("id", PropertyValue::Text(id))]),
+        &note_path,
+        &set_properties(&note, &[("id", PropertyValue::Text(id.clone()))]),
+    )?;
+    write_new(
+        &timeline_path,
+        &render(&templates::TIMELINE.load(vault)?, &vars),
     )?;
     let project = Project::load(&dir)?.context("the project note was not created")?;
     let book = create_book(vault, &project, &spec.book, &taken, today)?;
@@ -314,10 +324,10 @@ fn project_stems(project: &Project, book: Option<&Book>) -> Result<HashSet<Strin
         .collect())
 }
 
-/// Starts a project: creates it, then records a zero snapshot for its first book so everything
-/// written from now on counts as words written. Given the name of an idea in the ideas file, the
-/// idea's premise replaces the book's premise and the idea is linked to the new project; nothing
-/// is created if the idea can't be found.
+/// Starts a project: creates it, then records a zero snapshot for its first book and its
+/// scratchpad so everything written from now on counts as words written. Given the name of an idea
+/// in the ideas file, the idea's premise replaces the book's premise and the idea is linked to the
+/// new project; nothing is created if the idea can't be found.
 pub fn start_project(
     vault: &Vault,
     spec: &NewProject,
@@ -350,13 +360,11 @@ pub fn start_project(
         ..*spec
     };
     let (project, book) = create_project(vault, &spec, now.date())?;
-    record_start(vault, &book, now)?;
+    record_start(vault, &[book.log_key(), project.log_key()], now)?;
     if let Some((content, idea)) = &found {
-        fs::write(
-            &ideas_path,
-            ideas::link_idea(content, idea.line, &project.slug),
-        )
-        .with_context(|| format!("writing {}", ideas_path.display()))?;
+        let link = LinkIndex::build(vault)?.link(&ideas_path, &project.note.path, &project.title());
+        fs::write(&ideas_path, ideas::link_idea(content, idea.line, &link))
+            .with_context(|| format!("writing {}", ideas_path.display()))?;
     }
     Ok((project, book))
 }
@@ -369,13 +377,15 @@ pub fn start_book(
     now: NaiveDateTime,
 ) -> Result<Book> {
     let book = add_book(vault, project, spec, now.date())?;
-    record_start(vault, &book, now)?;
+    record_start(vault, &[book.log_key()], now)?;
     Ok(book)
 }
 
-fn record_start(vault: &Vault, book: &Book, now: NaiveDateTime) -> Result<()> {
+/// Records a zero count for new things to measure, so their first words count as written.
+fn record_start(vault: &Vault, keys: &[String], now: NaiveDateTime) -> Result<()> {
     let history_path = vault.history_path();
-    History::load(&history_path)?.record(&history_path, now, &[(book.log_key(), 0)])?;
+    let counts: Vec<(String, u64)> = keys.iter().map(|key| (key.clone(), 0)).collect();
+    History::load(&history_path)?.record(&history_path, now, &counts)?;
     Ok(())
 }
 
@@ -438,6 +448,166 @@ pub fn add_scene(
         }
     }
     new.created(vault)
+}
+
+/// Adds a scrap to a scratchpad: the project's, or with `None` the vault's. It is named by the time
+/// of capture (`2026-11-05-2109.md`, or `2026-11-05-2109-2.md` if the vault already has one),
+/// takes its properties from the template, with `source` set when given, and holds `text` exactly
+/// as given.
+pub fn add_scrap(
+    vault: &Vault,
+    project: Option<&Project>,
+    text: &str,
+    source: Option<&str>,
+    now: NaiveDateTime,
+) -> Result<NewNote> {
+    let dir = project.map_or_else(|| vault.scratchpad_dir(), Project::scratchpad_dir);
+    // Unique across the vault, so a link to a captured note is never ambiguous in Obsidian.
+    let taken = stems(&vault.root)?;
+    let slug = unique_slug(&now.format("%Y-%m-%d-%H%M").to_string(), |candidate| {
+        taken.contains(candidate)
+    });
+    let path = dir.join(format!("{slug}.md"));
+    let project_title = project.map(Project::title).unwrap_or_default();
+    let date = now.format("%Y-%m-%d").to_string();
+    let vars = [
+        ("title", slug.as_str()),
+        ("project", project_title.as_str()),
+        ("date", date.as_str()),
+    ];
+    let mut note = render(&templates::SCRAP.load(vault)?, &vars);
+    if let Some(source) = source.map(str::trim).filter(|source| !source.is_empty()) {
+        note = set_properties(
+            &note,
+            &[("source", PropertyValue::Text(source.to_string()))],
+        );
+    }
+    if !text.is_empty() {
+        let end = if text.ends_with('\n') { "" } else { "\n" };
+        note = replace_body(&note, &format!("{text}{end}"));
+    }
+    write_new(&path, &note)?;
+    Prepared {
+        name: slug.clone(),
+        path,
+        slug,
+        text: note,
+    }
+    .created(vault)
+}
+
+/// A research note to add.
+#[derive(Clone, Copy)]
+pub struct NewResearch<'a> {
+    /// What it is about: the note's name.
+    pub name: &'a str,
+    /// Where it came from: a URL or citation.
+    pub source: Option<&'a str>,
+    /// What it says, in place of the template's prompt.
+    pub text: Option<&'a str>,
+    /// Added by an agent: the note opens with a callout saying so, so the writer knows to check it
+    /// against its source.
+    pub by_agent: bool,
+}
+
+/// The callout that opens a research note an agent added.
+pub const AGENT_CALLOUT: &str =
+    "> [!note] Added by an agent\n> Check it against its source before the story relies on it.";
+
+/// Adds a research note: to the project's `research/`, or with `None` the vault's. It is named
+/// as [`add_note`] names notes.
+pub fn add_research(
+    vault: &Vault,
+    project: Option<&Project>,
+    research: &NewResearch,
+    today: NaiveDate,
+) -> Result<NewNote> {
+    let name = research
+        .name
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let slug = slugify(&name);
+    if slug.is_empty() {
+        bail!("the name needs at least one letter or number");
+    }
+    let dir = project.map_or_else(|| vault.research_dir(), Project::research_dir);
+    if scratchpad::research(&dir)?
+        .iter()
+        .any(|note| note.title().eq_ignore_ascii_case(&name))
+    {
+        let owner = project.map_or_else(|| "The vault".to_string(), Project::title);
+        bail!("{owner} already has research called {name}");
+    }
+    let taken = match project {
+        Some(project) => project_stems(project, None)?,
+        None => stems(&dir)?,
+    };
+    let slug = unique_slug(&slug, |candidate| taken.contains(candidate));
+    let path = dir.join(format!("{slug}.md"));
+    let project_title = project.map(Project::title).unwrap_or_default();
+    let date = today.format("%Y-%m-%d").to_string();
+    let vars = [
+        ("title", name.as_str()),
+        ("project", project_title.as_str()),
+        ("date", date.as_str()),
+    ];
+    let mut note = render(&templates::RESEARCH.load(vault)?, &vars);
+    if let Some(text) = research.text.filter(|text| !text.trim().is_empty()) {
+        note = replace_body(&note, &format!("# {name}\n\n{}\n", text.trim_end()));
+    }
+    if research.by_agent {
+        note = opening_with(&note, AGENT_CALLOUT);
+    }
+    if let Some(source) = research.source.map(str::trim).filter(|s| !s.is_empty()) {
+        note = set_properties(
+            &note,
+            &[("source", PropertyValue::Text(source.to_string()))],
+        );
+    }
+    let text = with_first_alias(&path, &note, &name);
+    write_new(&path, &text)?;
+    Prepared {
+        path,
+        name,
+        slug,
+        text,
+    }
+    .created(vault)
+}
+
+/// A note with `block` at the start of its body, after its title heading if it opens with one.
+fn opening_with(content: &str, block: &str) -> String {
+    let (_, body) = split_frontmatter(content);
+    let lines: Vec<&str> = body.lines().collect();
+    let first = lines.iter().position(|line| !line.trim().is_empty());
+    let at = first
+        .filter(|&i| lines[i].starts_with("# "))
+        .map_or(0, |i| i + 1);
+    let mut out: Vec<&str> = lines[..at].to_vec();
+    if at > 0 {
+        out.push("");
+    }
+    out.extend(block.lines());
+    let rest: Vec<&str> = lines[at..]
+        .iter()
+        .copied()
+        .skip_while(|line| line.trim().is_empty())
+        .collect();
+    if !rest.is_empty() {
+        out.push("");
+        out.extend(rest);
+    }
+    replace_body(content, &(out.join("\n") + "\n"))
+}
+
+/// Lower-cased file names of the notes in `dir`.
+fn stems(dir: &Path) -> Result<HashSet<String>> {
+    Ok(markdown_files(dir)?
+        .iter()
+        .filter_map(|path| path.file_stem())
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .collect())
 }
 
 /// A note about to be created: where, and its text.
@@ -520,6 +690,7 @@ fn with_first_alias(path: &Path, note: &str, name: &str) -> String {
 mod tests {
     use super::*;
     use crate::Scene;
+    use crate::scratchpad::Scratchpad;
     use crate::structures::THREE_ACT;
     use tempfile::TempDir;
 
@@ -623,6 +794,14 @@ mod tests {
             fs::read_to_string(first.flow_path())
                 .unwrap()
                 .contains("around 9,000 words")
+        );
+        let timeline = fs::read_to_string(project.timeline_path()).unwrap();
+        assert!(timeline.starts_with("---\ntype: timeline\n---\n# Sample Story timeline\n"));
+        assert!(
+            project
+                .note
+                .body
+                .contains("- [[sample-story-world-timeline|Timeline]]: ")
         );
         let (project_id, book_id) = (project.id().unwrap(), first.id().unwrap());
         assert_ne!(project_id, book_id);
@@ -808,7 +987,11 @@ mod tests {
         let log = fs::read_to_string(vault.history_path()).unwrap();
         assert_eq!(
             log,
-            format!("timestamp,id,words\n2026-10-30T09:00:00,{id},0\n")
+            format!(
+                "timestamp,id,words\n2026-10-30T09:00:00,{id},0\n2026-10-30T09:00:00,{},0\n",
+                project.log_key()
+            ),
+            "the book and the project's scratchpad start from nothing"
         );
     }
 
@@ -830,6 +1013,107 @@ mod tests {
         let book = project.find_book(None, dir.path()).unwrap();
         assert_eq!(book.id(), None);
         assert_eq!(book.log_key(), "old-world/old-story");
+        assert_eq!(project.log_key(), "old-world/scratchpad");
+    }
+
+    #[test]
+    fn captures_scraps_as_given() {
+        let (dir, vault) = vault();
+        let (project, _) = create_project(&vault, &standalone("Sample Story"), today()).unwrap();
+        let now = today().and_hms_opt(21, 9, 0).unwrap();
+        let text = "  A line, as dictated.\n\n- and a list  ";
+        let first = add_scrap(&vault, None, text, Some("dictation"), now).unwrap();
+        assert_eq!(
+            first.path,
+            vault.root.join("scratchpad/2026-10-30-2109.md"),
+            "named by the time of capture"
+        );
+        assert_eq!(
+            fs::read_to_string(&first.path).unwrap(),
+            format!(
+                "---\ntype: scrap\ncreated: 2026-10-30\ntags: []\nsource: dictation\n---\n{text}\n"
+            )
+        );
+        let second = add_scrap(&vault, None, "Another.", None, now).unwrap();
+        assert!(second.path.ends_with("scratchpad/2026-10-30-2109-2.md"));
+        let empty = add_scrap(&vault, Some(&project), "", None, now).unwrap();
+        assert_eq!(
+            empty.path,
+            dir.path()
+                .join("sample-story-world/scratchpad/2026-10-30-2109-3.md"),
+            "unique in the vault, for Obsidian"
+        );
+        assert_eq!(
+            fs::read_to_string(&empty.path).unwrap(),
+            "---\ntype: scrap\ncreated: 2026-10-30\ntags: []\n---\n"
+        );
+
+        fs::write(
+            vault.ideas_path(),
+            "### Fiction\n\n1. Four words of idea.\n",
+        )
+        .unwrap();
+        let counts = vault.counts(&vault.measure().unwrap()).unwrap();
+        let count = |key: &str| counts.iter().find(|(k, _)| k == key).map(|(_, w)| *w);
+        assert_eq!(
+            count("scratchpad"),
+            Some(12),
+            "both scraps and the ideas file"
+        );
+        assert_eq!(count(&project.log_key()), Some(0));
+        let scratchpad = Scratchpad::of_vault(&vault).unwrap();
+        assert_eq!(
+            scratchpad
+                .notes
+                .iter()
+                .map(|note| note.name.as_str())
+                .collect::<Vec<_>>(),
+            ["2026-10-30-2109-2", "2026-10-30-2109"],
+            "newest first, without the ideas file"
+        );
+    }
+
+    #[test]
+    fn adds_research_with_its_source() {
+        let (_dir, vault) = vault();
+        let (project, _) = create_project(&vault, &standalone("Sample Story"), today()).unwrap();
+        let research = NewResearch {
+            name: "Orbital Mechanics",
+            source: Some("https://example.com/orbits"),
+            text: None,
+            by_agent: false,
+        };
+        let added = add_research(&vault, Some(&project), &research, today()).unwrap();
+        assert!(
+            added
+                .path
+                .ends_with("sample-story-world/research/orbital-mechanics.md")
+        );
+        let note = Note::load(&added.path).unwrap();
+        assert_eq!(note.frontmatter.str("type").as_deref(), Some("research"));
+        assert_eq!(note.title(), "Orbital Mechanics");
+        assert_eq!(
+            note.frontmatter.str("source").as_deref(),
+            Some("https://example.com/orbits")
+        );
+        assert!(note.body.contains("%% What is true in the real world"));
+        assert!(
+            add_research(&vault, Some(&project), &research, today()).is_err(),
+            "the project already has it"
+        );
+
+        let by_agent = NewResearch {
+            text: Some("What the source says.\n"),
+            by_agent: true,
+            ..research
+        };
+        let added = add_research(&vault, None, &by_agent, today()).unwrap();
+        assert_eq!(added.path, vault.root.join("research/orbital-mechanics.md"));
+        let note = Note::load(&added.path).unwrap();
+        assert_eq!(
+            note.body,
+            format!("# Orbital Mechanics\n\n{AGENT_CALLOUT}\n\nWhat the source says.\n")
+        );
     }
 
     #[test]

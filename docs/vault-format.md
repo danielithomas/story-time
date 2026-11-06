@@ -142,7 +142,8 @@ Order is written as a Markdown list of links, readable and clickable in any edit
 
 - The section runs from its heading to the next heading at the same level. The rest of the note is free for notes about the book.
 - **Scenes** are list items that are links.
-- **Chapters** are list items that aren't links, with their scenes nested beneath. The item's text is the chapter's title, or `Chapter` for an untitled one. Chapters are numbered when compiled. A scene listed at the top level is a chapter of its own, untitled.
+- **Chapters** are list items that aren't links, with their scenes nested beneath. The item's text is the chapter's title, or `Chapter` for an untitled one. A scene listed at the top level is a chapter of its own, untitled.
+- **Numbering.** Untitled chapters are numbered in order when compiled and in the app: Chapter 1, Chapter 2. A titled chapter, such as `Prologue` or `The Long Night`, goes by its title and isn't counted, so a book can read Prologue, Chapter 1, Chapter 2, Epilogue.
 - **Parts** are `###` headings inside the section. They are optional, and the app shows them only in books that use them (#2).
 - **Unplaced scenes.** A scene in `scenes/` that isn't in the list is shown as unplaced, not reported as an error. It joins the list when it's placed.
 - story-time rewrites only this section when something moves.

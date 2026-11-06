@@ -17,6 +17,7 @@ tags: []
 - `bible/characters/`: who they are, how they look and speak, what drives them
 - `bible/locations/`: where things happen
 - `bible/world/`: how the world works, and what it costs
+- {{timeline_link}}: what happened when, including what no scene shows
 
 ## Themes
 

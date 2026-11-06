@@ -1,6 +1,6 @@
 //! World-bible checks: gaps between what a project's scenes mention and what its notes document,
 //! contents that don't match the scenes, links Obsidian can't follow, and file names that break
-//! the naming rules.
+//! the naming rules. Scratchpads are left alone, apart from their file names.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use crate::links::{LinkIndex, Resolution, links};
 use crate::note::{Note, PropertyValue, section};
 use crate::project::{BOOKS_HEADING, NoteKind, Project};
+use crate::scratchpad;
 use crate::text::{contains_word, is_slug, slug_matches, slugify};
 use crate::vault::Vault;
 use crate::words::prose;
@@ -107,16 +108,24 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
             .or_default()
             .insert(name);
     }
+    let timeline = project.timeline_path();
+    if timeline.is_file() {
+        planning.push(Note::load(&timeline)?);
+    }
+    let research = scratchpad::research(&project.research_dir())?;
     let mut bible = Vec::new();
     for kind in BIBLE {
         bible.extend(project.notes(kind)?.into_iter().map(|note| (kind, note)));
     }
 
+    // Scraps are left out: fragments may mention notes that don't exist yet, and captured ones
+    // are named by date.
     let notes = scenes
         .iter()
         .map(|s| &s.note)
         .chain([&project.note])
         .chain(planning.iter())
+        .chain(research.iter())
         .chain(bible.iter().map(|(_, note)| note));
     for note in notes {
         if let Some(error) = &note.frontmatter_error {
@@ -186,6 +195,7 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
         .map(|s| &s.note)
         .chain([&project.note])
         .chain(books.iter().map(|book| &book.note))
+        .chain(research.iter())
         .chain(bible.iter().map(|(_, note)| note));
     for note in all_notes {
         if let Some(name) = drifted(note, project) {
@@ -304,7 +314,10 @@ mod tests {
     use crate::contents::Place;
     use crate::note::set_section;
     use crate::project::{Book, Form};
-    use crate::scaffold::{NewBook, NewProject, add_note, add_scene, create_project};
+    use crate::scaffold::{
+        NewBook, NewProject, NewResearch, add_note, add_research, add_scene, add_scrap,
+        create_project,
+    };
     use crate::structures::FREEFORM;
     use chrono::NaiveDate;
     use std::fs;
@@ -389,6 +402,42 @@ mod tests {
             report.not_on_page.is_empty(),
             "a POV character is on the page"
         );
+    }
+
+    #[test]
+    fn checks_the_timeline_and_research_but_not_scratchpads() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(".obsidian")).unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        let (project, _) = create_project(&vault, &spec("Sample Story"), today()).unwrap();
+        let now = today().and_hms_opt(21, 9, 0).unwrap();
+        let scrap = add_scrap(&vault, Some(&project), "[[Not Yet]]", None, now).unwrap();
+        let text = fs::read_to_string(&scrap.path)
+            .unwrap()
+            .replace("type: scrap\n", "type: scrap\naliases: [A Fragment]\n");
+        fs::write(&scrap.path, text).unwrap();
+        let research = NewResearch {
+            name: "Orbits",
+            source: None,
+            text: Some("See [[Kepler]]."),
+            by_agent: false,
+        };
+        add_research(&vault, Some(&project), &research, today()).unwrap();
+        let timeline = project.timeline_path();
+        let text = fs::read_to_string(&timeline).unwrap() + "- Year 1: [[The Founding]]\n";
+        fs::write(&timeline, text).unwrap();
+
+        let report = check(&vault, &project).unwrap();
+        assert_eq!(
+            report.undocumented.keys().collect::<Vec<_>>(),
+            ["Kepler", "The Founding"]
+        );
+        assert!(
+            report.drifted.is_empty(),
+            "a captured note keeps its date: {:?}",
+            report.drifted
+        );
+        assert!(report.misnamed.is_empty());
     }
 
     #[test]

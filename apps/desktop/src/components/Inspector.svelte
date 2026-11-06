@@ -18,6 +18,9 @@
     character: "Character",
     location: "Location",
     world: "World",
+    timeline: "Timeline",
+    research: "Research",
+    scrap: "Scrap",
     note: "Note",
   };
 
@@ -232,6 +235,31 @@
           {/if}
         </div>
       </div>
+    {:else if doc.kind === "timeline"}
+      <p class="hint">
+        The world's chronology, in the order things happened. Scenes join it through their <em>When</em>; list
+        here what no scene shows, one event per line.
+      </p>
+    {:else if doc.kind === "research"}
+      <label class="field">
+        <span>Source</span>
+        <input value={text("source")} placeholder="A URL or citation" onchange={(e) => setProperty("source", e.currentTarget.value)} />
+      </label>
+      <label class="field">
+        <span>Names</span>
+        <input value={text("aliases")} placeholder="Subject, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
+      </label>
+      <p class="hint">What's true in the real world, for the story to use or knowingly break. It doesn't count toward your daily goal or any book.</p>
+    {:else if doc.kind === "scrap"}
+      {#if text("created")}
+        <p class="muted">Kept {text("created")}{text("source") ? ` · from ${text("source")}` : ""}</p>
+      {/if}
+      {#if text("used")}
+        <p class="muted">Used in {plainLinks(text("used"))}</p>
+      {/if}
+      <p class="hint">
+        A fragment kept until it's useful. Its words count toward your daily goal, but not toward any book.
+      </p>
     {:else if doc.kind === "flow"}
       <p class="muted">Laid out as <strong>{structureName}</strong>.</p>
       <p class="hint">

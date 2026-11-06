@@ -197,14 +197,13 @@ pub fn find_idea(content: &str, name: &str) -> Option<Idea> {
     })
 }
 
-/// Appends a link to the project an idea became, unless it already has one.
-pub fn link_idea(content: &str, line: usize, slug: &str) -> String {
-    let link = format!("[[{slug}]]");
+/// Appends `link`, a link to the project an idea became, unless the idea already has it.
+pub fn link_idea(content: &str, line: usize, link: &str) -> String {
     let mut out: Vec<String> = content
         .lines()
         .enumerate()
         .map(|(i, text)| {
-            if i == line && !text.contains(&link) {
+            if i == line && !text.contains(link) {
                 format!("{} → {link}", text.trim_end())
             } else {
                 text.to_string()
@@ -272,11 +271,11 @@ mod tests {
 
     #[test]
     fn lists_ideas_with_their_projects() {
-        let linked = link_idea(IDEAS, 7, "sample-story");
+        let linked = link_idea(IDEAS, 7, "[[sample-story-world|Sample Story]]");
         let ideas = list_ideas(&format!("{linked}- A loose note\n"));
         let names: Vec<_> = ideas.iter().map(|idea| idea.name.as_str()).collect();
         assert_eq!(names, ["Sample Story", "Second", "Third", "A loose note"]);
-        assert_eq!(ideas[0].project.as_deref(), Some("sample-story"));
+        assert_eq!(ideas[0].project.as_deref(), Some("sample-story-world"));
         assert_eq!(ideas[0].text, "Sample Story: A premise, with a catch.");
         assert_eq!(ideas[0].section, "Fiction");
         assert_eq!(ideas[3].section, "Non-Fiction");
@@ -292,9 +291,9 @@ mod tests {
 
     #[test]
     fn links_an_idea_once() {
-        let linked = link_idea(IDEAS, 9, "third");
-        assert!(linked.contains("1. Third. A premise with _emphasis_. → [[third]]\n"));
-        assert_eq!(link_idea(&linked, 9, "third"), linked);
+        let linked = link_idea(IDEAS, 9, "[[third|Third]]");
+        assert!(linked.contains("1. Third. A premise with _emphasis_. → [[third|Third]]\n"));
+        assert_eq!(link_idea(&linked, 9, "[[third|Third]]"), linked);
         assert_eq!(
             find_idea(&linked, "Third").unwrap().premise,
             "A premise with _emphasis_."

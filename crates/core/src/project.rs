@@ -34,9 +34,13 @@ pub const BIBLE_DIR: &str = "bible";
 pub const BOOKS_DIR: &str = "books";
 /// The heading in a project note under which its books are listed in order.
 pub const BOOKS_HEADING: &str = "Books";
+/// The folder, in the vault and in each project, holding research notes.
+pub const RESEARCH_DIR: &str = "research";
+/// The folder in each project holding its scratchpad. The vault's is set in its config.
+pub const SCRATCHPAD_DIR: &str = "scratchpad";
 
 /// Folders at the vault root that are never projects.
-pub const RESERVED: [&str; 3] = ["research", "scratchpad", "templates"];
+pub const RESERVED: [&str; 3] = [RESEARCH_DIR, SCRATCHPAD_DIR, "templates"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteKind {
@@ -226,6 +230,26 @@ impl Project {
 
     pub fn books_dir(&self) -> PathBuf {
         self.dir.join(BOOKS_DIR)
+    }
+
+    /// The world's chronology, `bible/<slug>-timeline.md`.
+    pub fn timeline_path(&self) -> PathBuf {
+        self.bible_dir().join(format!("{}-timeline.md", self.slug))
+    }
+
+    pub fn research_dir(&self) -> PathBuf {
+        self.dir.join(RESEARCH_DIR)
+    }
+
+    pub fn scratchpad_dir(&self) -> PathBuf {
+        self.dir.join(SCRATCHPAD_DIR)
+    }
+
+    /// What the writing log records the project's scratchpad under: the project's ID, or its
+    /// folder name and `/scratchpad` if it has none.
+    pub fn log_key(&self) -> String {
+        self.id()
+            .unwrap_or_else(|| format!("{}/{SCRATCHPAD_DIR}", self.slug))
     }
 
     /// Where world-bible notes of `kind` live. Scenes belong to a book instead.

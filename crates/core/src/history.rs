@@ -1,8 +1,8 @@
 //! The writing log: word-count snapshots in `.story-time/history.csv`, and what they add up to.
 //!
 //! A snapshot is taken whenever a command measures the vault, and only for what changed. Each
-//! row is keyed by the project's ID, or by its folder name for projects created before IDs, so a
-//! renamed project keeps its history. Words written on a day are the net change between
+//! row is keyed by what was measured: a book's ID, or a scratchpad's (its project's ID, or
+//! `scratchpad` for the vault's), so a renamed book or project keeps its history. Words written on a day are the net change between
 //! snapshots, so words written on a day when nothing was measured count towards the next day that
 //! is. The file lives in the vault, so it is backed up and synced with everything else.
 //!
@@ -23,7 +23,8 @@ const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
     pub at: NaiveDateTime,
-    /// What was measured, as [`crate::project::Project::log_key`] gives it.
+    /// What was measured, as [`crate::project::Book::log_key`] or
+    /// [`crate::scratchpad::Scratchpad::log_key`] gives it.
     pub key: String,
     pub words: u64,
 }

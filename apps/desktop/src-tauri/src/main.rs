@@ -36,6 +36,8 @@ fn main() {
             commands::create_book,
             commands::add_note,
             commands::add_scene,
+            commands::add_scrap,
+            commands::add_research,
             commands::link_for,
             commands::writing_today,
             commands::record_snapshot,

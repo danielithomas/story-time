@@ -10,7 +10,8 @@ use chrono::NaiveDateTime;
 use crate::config::{self, Config, META_DIR};
 use crate::contents::Contents;
 use crate::history::History;
-use crate::project::{Book, Project};
+use crate::project::{Book, Project, RESEARCH_DIR};
+use crate::scratchpad::Scratchpad;
 use crate::text::{natural_cmp, slugify};
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,16 @@ impl Vault {
 
     pub fn templates_dir(&self) -> PathBuf {
         self.root.join(&self.config.templates_dir)
+    }
+
+    /// The vault's scratchpad, for fragments not tied to any world.
+    pub fn scratchpad_dir(&self) -> PathBuf {
+        self.root.join(&self.config.scratchpad)
+    }
+
+    /// Research useful to more than one world.
+    pub fn research_dir(&self) -> PathBuf {
+        self.root.join(RESEARCH_DIR)
     }
 
     /// A path relative to the vault, for display.
@@ -165,12 +176,35 @@ impl Vault {
         Ok(measured)
     }
 
-    /// Measures every book and records the counts that changed in the writing log.
+    /// The vault's scratchpad, then each project's.
+    pub fn scratchpads(&self) -> Result<Vec<Scratchpad>> {
+        let mut scratchpads = vec![Scratchpad::of_vault(self)?];
+        for project in self.projects()? {
+            scratchpads.push(Scratchpad::of_project(&project)?);
+        }
+        Ok(scratchpads)
+    }
+
+    /// Word counts as the writing log records them: each book's, then each scratchpad's. Every
+    /// scratchpad is included, even an empty one, so moving a scene into one is never counted as
+    /// words lost.
+    pub fn counts(&self, measured: &[Measured]) -> Result<Vec<(String, u64)>> {
+        let mut counts: Vec<(String, u64)> = measured
+            .iter()
+            .map(|m| (m.book.log_key(), m.words))
+            .collect();
+        for scratchpad in self.scratchpads()? {
+            counts.push((scratchpad.log_key(), scratchpad.words));
+        }
+        Ok(counts)
+    }
+
+    /// Measures every book and scratchpad and records the counts that changed in the writing log.
     pub fn snapshot(&self, now: NaiveDateTime) -> Result<(Vec<Measured>, History)> {
         let measured = self.measure()?;
         let path = self.history_path();
         let mut history = History::load(&path)?;
-        history.record(&path, now, &counts(&measured))?;
+        history.record(&path, now, &self.counts(&measured)?)?;
         Ok((measured, history))
     }
 
@@ -201,14 +235,6 @@ pub struct Measured {
     pub contents: Contents,
     /// Words in all the book's scenes, placed or not.
     pub words: u64,
-}
-
-/// Word counts by book, keyed as the writing log records them.
-pub fn counts(measured: &[Measured]) -> Vec<(String, u64)> {
-    measured
-        .iter()
-        .map(|m| (m.book.log_key(), m.words))
-        .collect()
 }
 
 /// Markdown files under `dir`, skipping hidden folders. A missing folder has none.
