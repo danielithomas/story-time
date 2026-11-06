@@ -4,6 +4,8 @@ export interface VaultInfo {
   path: string;
   name: string;
   dailyGoal: number;
+  /** Laid out as story-time 0.1 did it: it must be upgraded before it opens. */
+  needsUpgrade: boolean;
 }
 
 export interface Choice {

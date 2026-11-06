@@ -22,6 +22,7 @@ use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
 use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::structures::{self, STRUCTURES};
 use story_time_core::text::thousands;
+use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Project, Scene, Vault, check, config, words};
 use tauri::{State, WebviewWindow};
@@ -60,10 +61,18 @@ impl AppState {
         self.root.lock().expect("state lock").is_some()
     }
 
-    fn vault(&self) -> CmdResult<Vault> {
+    /// The open vault, in whatever format it is in.
+    fn any_vault(&self) -> CmdResult<Vault> {
         let root = self.root.lock().expect("state lock").clone();
         let root = root.ok_or_else(|| "No stories folder is open.".to_string())?;
         Vault::open(root).or_message()
+    }
+
+    /// The open vault, refused while it needs upgrading, so nothing misreads or edits it.
+    fn vault(&self) -> CmdResult<Vault> {
+        let vault = self.any_vault()?;
+        vault.config.ensure_current().or_message()?;
+        Ok(vault)
     }
 
     fn project(&self, slug: &str) -> CmdResult<(Vault, Project)> {
@@ -97,6 +106,8 @@ pub struct VaultInfo {
     path: String,
     name: String,
     daily_goal: u64,
+    /// The vault is laid out as story-time 0.1 did it, and must be upgraded before it's opened.
+    needs_upgrade: bool,
 }
 
 fn vault_info(vault: &Vault) -> VaultInfo {
@@ -108,6 +119,7 @@ fn vault_info(vault: &Vault) -> VaultInfo {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default(),
         daily_goal: vault.config.daily_goal,
+        needs_upgrade: vault.config.needs_upgrade(),
     }
 }
 
@@ -494,12 +506,13 @@ pub async fn vault_status(
     if !state.is_open() {
         return Ok(None);
     }
-    let vault = state.vault()?;
+    let vault = state.any_vault()?;
     apply_spelling(&window, spelling_languages(&vault));
     Ok(Some(vault_info(&vault)))
 }
 
-/// Opens a stories folder, setting it up if it is new, and remembers it for next time.
+/// Opens a stories folder, setting it up if it is new, and remembers it for next time. A folder
+/// in story-time 0.1's layout is left as it is until the writer chooses to upgrade it.
 #[tauri::command]
 pub async fn open_vault(
     path: String,
@@ -507,12 +520,24 @@ pub async fn open_vault(
     window: WebviewWindow,
 ) -> CmdResult<VaultInfo> {
     let root = PathBuf::from(&path);
-    scaffold::init_vault(&root, false).or_message()?;
+    if !config::Config::load(&root).or_message()?.needs_upgrade() {
+        scaffold::init_vault(&root, false).or_message()?;
+    }
     let vault = Vault::open(&root).or_message()?;
     config::set_user_default_vault(&vault.root).or_message()?;
     state.remember(vault.root.clone());
     apply_spelling(&window, spelling_languages(&vault));
     Ok(vault_info(&vault))
+}
+
+/// Upgrades the open vault to the current format, after backing it up. Returns where the backup is,
+/// relative to the vault.
+#[tauri::command]
+pub async fn upgrade_vault(state: State<'_, AppState>) -> CmdResult<String> {
+    let vault = state.any_vault()?;
+    let plan = upgrade::plan(&vault).or_message()?;
+    let backup = upgrade::apply(&vault, &plan, Local::now().naive_local()).or_message()?;
+    Ok(vault.relative(&backup).display().to_string())
 }
 
 #[tauri::command]

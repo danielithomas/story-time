@@ -26,6 +26,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
             commands::open_vault,
+            commands::upgrade_vault,
             commands::choices,
             commands::list_projects,
             commands::project_tree,

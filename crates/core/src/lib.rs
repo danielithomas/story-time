@@ -24,6 +24,7 @@ pub mod scratchpad;
 pub mod structures;
 pub mod templates;
 pub mod text;
+pub mod upgrade;
 pub mod vault;
 pub mod words;
 

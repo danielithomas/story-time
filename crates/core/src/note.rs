@@ -228,6 +228,27 @@ pub fn set_properties(content: &str, updates: &[(&str, PropertyValue)]) -> Strin
     format!("---\n{yaml}---\n{body}")
 }
 
+/// Removes properties from a note's text, leaving every other line as written.
+pub fn remove_properties(content: &str, keys: &[&str]) -> String {
+    let (Some(yaml), body) = split_frontmatter(content) else {
+        return content.to_string();
+    };
+    let mut kept = String::new();
+    let mut removing = false;
+    for line in yaml.lines() {
+        match top_level_key(line) {
+            Some(key) => removing = keys.contains(&key),
+            None if !continues_value(line) => removing = false,
+            None => {}
+        }
+        if !removing {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    format!("---\n{kept}---\n{body}")
+}
+
 /// The key a frontmatter line starts, if it starts one at the top level.
 fn top_level_key(line: &str) -> Option<&str> {
     if line.starts_with([' ', '\t', '-', '#']) {
@@ -473,6 +494,16 @@ mod tests {
             split_frontmatter("---\r\na: 1\r\n---\r\nBody"),
             (Some("a: 1\r\n"), "Body")
         );
+    }
+
+    #[test]
+    fn removes_properties() {
+        let content = "---\ntype: chapter\nproject: \"[[old]]\"\naliases:\n  - A\n# kept\nstatus: draft\n---\nBody\n";
+        assert_eq!(
+            remove_properties(content, &["project", "aliases"]),
+            "---\ntype: chapter\n# kept\nstatus: draft\n---\nBody\n"
+        );
+        assert_eq!(remove_properties("Body\n", &["type"]), "Body\n");
     }
 
     #[test]

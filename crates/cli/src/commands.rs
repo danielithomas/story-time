@@ -7,11 +7,13 @@ use anyhow::{Context, Result, bail};
 use chrono::{Days, NaiveDateTime};
 use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
+use story_time_core::config::FORMAT;
 use story_time_core::contents::Place;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
 use story_time_core::scratchpad::{self, Scratchpad};
+use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
@@ -40,6 +42,46 @@ pub fn init(root: &Path, force: bool) -> Result<()> {
     {
         println!(
             "\nObsidian's Templates plugin now reads from the templates folder (restart Obsidian if it is open)."
+        );
+    }
+    Ok(())
+}
+
+pub fn upgrade(vault: &Vault, dry_run: bool, now: NaiveDateTime) -> Result<()> {
+    let plan = upgrade::plan(vault)?;
+    let shown = |path: &Path| vault.relative(path).display().to_string();
+    println!("Upgrading {} to format {FORMAT}", vault.root.display());
+    for world in &plan.worlds {
+        println!(
+            "  {}/ becomes a world with one book, {}/",
+            shown(&world.from),
+            shown(world.book.parent().unwrap_or(&world.book))
+        );
+        println!("    create  {}", shown(&world.note));
+        println!("    create  {}", shown(&world.timeline));
+    }
+    for (from, to) in &plan.moves {
+        println!("    move    {} → {}", shown(from), shown(to));
+    }
+    for path in &plan.replaced {
+        println!(
+            "    replace {} (unchanged since story-time 0.1)",
+            shown(path)
+        );
+    }
+    println!("    update  the config, Obsidian's templates folder, and links to notes that moved");
+    if dry_run {
+        println!("\nNothing was changed. Run `story-time upgrade` to make these changes.");
+        return Ok(());
+    }
+    let backup = upgrade::apply(vault, &plan, now)?;
+    println!("\nUpgraded. The vault as it was is in {}.", shown(&backup));
+    if plan.moves.iter().any(|(_, to)| {
+        to.file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("old-"))
+    }) {
+        println!(
+            "Templates you had changed are kept as templates/old-*.md: copy what you want into the new ones."
         );
     }
     Ok(())

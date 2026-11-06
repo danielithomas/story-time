@@ -24,6 +24,8 @@ import type {
 export const api = {
   vaultStatus: () => invoke<VaultInfo | null>("vault_status"),
   openVault: (path: string) => invoke<VaultInfo>("open_vault", { path }),
+  /** Returns where the backup of the folder as it was is kept. */
+  upgradeVault: () => invoke<string>("upgrade_vault"),
   choices: () => invoke<Choices>("choices"),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   projectTree: (slug: string, book: string | null) => invoke<ProjectTree>("project_tree", { slug, book }),

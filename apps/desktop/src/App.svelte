@@ -23,7 +23,7 @@
 
 {#if !app.ready}
   <div class="loading"></div>
-{:else if !app.vault}
+{:else if !app.vault || app.vault.needsUpgrade}
   <Welcome />
 {:else}
   <div class="shell {layout}">

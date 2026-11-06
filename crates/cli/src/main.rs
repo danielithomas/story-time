@@ -129,6 +129,13 @@ enum Command {
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
     Check { project: Option<String> },
+    /// Convert a vault from story-time 0.1's layout to the current one, after copying it into
+    /// .story-time/backups/.
+    Upgrade {
+        /// List the changes without making them.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Stitch the scenes a book's contents list into one manuscript.
     Compile {
         project: Option<String>,
@@ -228,9 +235,13 @@ fn run(cli: Cli) -> Result<()> {
     }
     let vault = Vault::discover(cli.vault.as_deref(), &cwd)?;
     let now = Local::now().naive_local();
+    if let Command::Upgrade { dry_run } = cli.command {
+        return commands::upgrade(&vault, dry_run, now);
+    }
+    vault.config.ensure_current()?;
     // Values below were validated by clap's possible-values parsers.
     match cli.command {
-        Command::Init { .. } => unreachable!("handled above"),
+        Command::Init { .. } | Command::Upgrade { .. } => unreachable!("handled above"),
         Command::New {
             title,
             world,

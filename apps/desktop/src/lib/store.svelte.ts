@@ -87,7 +87,7 @@ export async function init() {
   try {
     app.choices = await api.choices();
     app.vault = await api.vaultStatus();
-    if (app.vault) await enterVault();
+    if (app.vault && !app.vault.needsUpgrade) await enterVault();
   } catch (error) {
     toastError(error);
   }
@@ -95,7 +95,7 @@ export async function init() {
   if (import.meta.env.DEV) void import("./dev").then((dev) => dev.run());
 
   setInterval(() => {
-    if (app.vault) api.recordSnapshot().catch(() => {});
+    if (app.vault && !app.vault.needsUpgrade) api.recordSnapshot().catch(() => {});
   }, SNAPSHOT_EVERY);
   window.addEventListener("focus", () => void reloadIfChangedElsewhere());
   window.addEventListener("keydown", onKey);
@@ -106,7 +106,7 @@ export async function init() {
       toast("This note hasn't been saved yet. Resolve the problem above, then close again.", undefined, "error");
       return;
     }
-    if (app.vault) await api.recordSnapshot().catch(() => {});
+    if (app.vault && !app.vault.needsUpgrade) await api.recordSnapshot().catch(() => {});
   });
 }
 
@@ -132,7 +132,19 @@ export async function chooseVault() {
   try {
     app.vault = await api.openVault(picked);
     app.view = "write";
+    if (!app.vault.needsUpgrade) await enterVault();
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Upgrades a folder in story-time 0.1's layout, then opens it. */
+export async function upgradeVault() {
+  try {
+    const backup = await api.upgradeVault();
+    app.vault = await api.vaultStatus();
     await enterVault();
+    toast(`Upgraded. The folder as it was is kept in ${backup}.`);
   } catch (error) {
     toastError(error);
   }

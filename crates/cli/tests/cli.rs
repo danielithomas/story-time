@@ -338,3 +338,68 @@ fn refuses_a_vault_in_a_newer_format() {
     }
     assert!(!root.join("templates").exists(), "nothing was written");
 }
+
+#[test]
+fn upgrades_a_vault_from_story_time_0_1() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir(root.join(".obsidian")).unwrap();
+    fs::write(
+        root.join(".obsidian/templates.json"),
+        "{\n  \"folder\": \"Templates\"\n}\n",
+    )
+    .unwrap();
+    fs::create_dir(root.join(".story-time")).unwrap();
+    fs::write(
+        root.join(".story-time/config.toml"),
+        "ideas_file = \"Scratchpad/Ideas.md\"\ntemplates_dir = \"Templates\"\n",
+    )
+    .unwrap();
+    fs::create_dir(root.join("Scratchpad")).unwrap();
+    fs::write(root.join("Scratchpad/Ideas.md"), IDEAS).unwrap();
+    fs::create_dir(root.join("Templates")).unwrap();
+    let old_templates = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/templates/format-0");
+    for entry in fs::read_dir(old_templates).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(
+            &path,
+            root.join("Templates").join(path.file_name().unwrap()),
+        )
+        .unwrap();
+    }
+
+    for args in [&["stats"][..], &["init"][..]] {
+        let output = run(root, args);
+        assert!(!output.status.success(), "{args:?} should fail");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("story-time upgrade"), "{stderr}");
+    }
+
+    let dry_run = ok(root, &["upgrade", "--dry-run"]);
+    assert!(
+        dry_run.contains("move    Scratchpad/Ideas.md → scratchpad/ideas.md")
+            && dry_run.contains("replace Templates/Chapter.md")
+            && dry_run.contains("Nothing was changed"),
+        "{dry_run}"
+    );
+    assert!(root.join("Scratchpad/Ideas.md").is_file());
+
+    let upgraded = ok(root, &["upgrade"]);
+    assert!(upgraded.contains("Upgraded."), "{upgraded}");
+    assert_eq!(
+        fs::read_to_string(root.join("scratchpad/ideas.md")).unwrap(),
+        IDEAS
+    );
+    assert!(root.join("templates/scene.md").is_file());
+    let config = fs::read_to_string(root.join(".story-time/config.toml")).unwrap();
+    assert!(config.starts_with("# The layout of this vault"), "{config}");
+    assert!(config.contains("format = 1"), "{config}");
+    ok(root, &["idea", "Third Story: one more"]);
+    let today = ok(root, &["today"]);
+    assert!(
+        today.contains("Scratchpad  +4"),
+        "the new idea counts: {today}"
+    );
+    let again = run(root, &["upgrade"]);
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already in format 1"));
+}

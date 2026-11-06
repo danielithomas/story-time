@@ -15,12 +15,13 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function run() {
   const env = import.meta.env;
   if (env.VITE_THEME) document.documentElement.dataset.theme = env.VITE_THEME;
-  if (env.VITE_SNAPSHOT_DIR && !app.vault) {
+  if (env.VITE_SNAPSHOT_DIR && (!app.vault || app.vault.needsUpgrade)) {
     await wait(1500);
-    await invoke("dev_snapshot", { path: `${env.VITE_SNAPSHOT_DIR}/welcome.png` });
+    const screen = app.vault ? "upgrade" : "welcome";
+    await invoke("dev_snapshot", { path: `${env.VITE_SNAPSHOT_DIR}/${screen}.png` });
     return;
   }
-  if (!app.vault) return;
+  if (!app.vault || app.vault.needsUpgrade) return;
   if (env.VITE_SNAPSHOT_DIR) await snapshotTour(env.VITE_SNAPSHOT_DIR);
   else if (env.VITE_START_VIEW) await startView(env.VITE_START_VIEW);
 }

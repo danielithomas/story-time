@@ -11,11 +11,22 @@ pub const META_DIR: &str = ".story-time";
 pub const CONFIG_FILE: &str = "config.toml";
 
 /// The newest vault format this build understands (docs/vault-format.md). A vault without a
-/// `format` setting uses the unversioned layout, format 0.
-pub const FORMAT: u32 = 0;
+/// `format` setting uses the unversioned layout of story-time 0.1, format 0, which
+/// `story-time upgrade` converts.
+pub const FORMAT: u32 = 1;
+
+/// Introduces the `format` setting in the config file.
+const FORMAT_COMMENT: &str =
+    "# The layout of this vault, so story-time reads it right. `story-time upgrade` changes it.";
+/// Introduces the `scratchpad` setting in the config file.
+const SCRATCHPAD_COMMENT: &str =
+    "# The vault's scratchpad: fragments not tied to any world (`story-time scrap add`).";
 
 /// The config file written by `story-time init`; it documents every setting.
 pub const DEFAULT_CONFIG: &str = r#"# story-time settings for this vault.
+
+# The layout of this vault, so story-time reads it right. `story-time upgrade` changes it.
+format = 1
 
 # Words you aim to write each day (used by `story-time today` and `story-time history`).
 daily_goal = 500
@@ -73,11 +84,15 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Loads the vault's config, or the defaults if it has none.
+    /// Loads the vault's config, or the defaults if it has none. A vault story-time has never
+    /// set up is new, so it is in the current format.
     pub fn load(vault_root: &Path) -> Result<Config> {
         let path = vault_root.join(META_DIR).join(CONFIG_FILE);
         if !path.exists() {
-            return Ok(Config::default());
+            return Ok(Config {
+                format: FORMAT,
+                ..Config::default()
+            });
         }
         let text =
             fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
@@ -96,6 +111,74 @@ impl Config {
         }
         Ok(())
     }
+
+    /// Whether the vault is in an older format, which `story-time upgrade` converts.
+    pub fn needs_upgrade(&self) -> bool {
+        self.format < FORMAT
+    }
+
+    /// Fails for a vault in an older format, which story-time would misread until it's upgraded.
+    pub fn ensure_current(&self) -> Result<()> {
+        if self.needs_upgrade() {
+            bail!(
+                "this vault is laid out the way story-time 0.1 did it. Run `story-time upgrade` \
+                 to convert it; it backs the vault up first."
+            );
+        }
+        Ok(())
+    }
+}
+
+/// A format-0 config file upgraded to format 1: `format` added before the first setting, the ideas
+/// file and templates pointed at their new folders, and the scratchpad set after the ideas file.
+/// Comments and other settings stay as written.
+pub fn upgraded_config(text: &str) -> String {
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    let find =
+        |lines: &[String], key: &str| lines.iter().position(|line| setting(line) == Some(key));
+    for (key, value) in [
+        ("ideas_file", "scratchpad/ideas.md"),
+        ("templates_dir", "templates"),
+    ] {
+        let line = format!("{key} = \"{value}\"");
+        match find(&lines, key) {
+            Some(i) => lines[i] = line,
+            None => lines.extend([String::new(), line]),
+        }
+    }
+    if find(&lines, "scratchpad").is_none() {
+        let at = find(&lines, "ideas_file").expect("set above") + 1;
+        let mut block = vec!["", SCRATCHPAD_COMMENT, "scratchpad = \"scratchpad\""];
+        if lines.get(at).is_some_and(|line| !line.trim().is_empty()) {
+            block.push("");
+        }
+        lines.splice(at..at, block.into_iter().map(String::from));
+    }
+    let format = format!("format = {FORMAT}");
+    match find(&lines, "format") {
+        Some(i) => lines[i] = format,
+        None => {
+            let first = lines
+                .iter()
+                .position(|line| setting(line).is_some())
+                .unwrap_or(lines.len());
+            let at = (0..first)
+                .rev()
+                .take_while(|&i| lines[i].starts_with('#'))
+                .last()
+                .unwrap_or(first);
+            lines.splice(at..at, [FORMAT_COMMENT.to_string(), format, String::new()]);
+        }
+    }
+    lines.join("\n") + "\n"
+}
+
+/// The key a line of the config file sets, if it sets one.
+fn setting(line: &str) -> Option<&str> {
+    if line.starts_with(['#', ' ', '\t', '[']) {
+        return None;
+    }
+    line.split_once('=').map(|(key, _)| key.trim())
 }
 
 /// Per-machine settings, so commands find the vault from any directory (for example a vault kept on OneDrive).
@@ -156,7 +239,32 @@ mod tests {
     #[test]
     fn default_file_matches_defaults() {
         let parsed: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
-        assert_eq!(parsed, Config::default());
+        assert_eq!(
+            parsed,
+            Config {
+                format: FORMAT,
+                ..Config::default()
+            }
+        );
+    }
+
+    #[test]
+    fn upgrades_config_files() {
+        let old = "# story-time settings for this vault.\n\n# Words you aim to write each day (used by `story-time today` and `story-time history`).\ndaily_goal = 500\n\n# Manuscript estimates. A standard manuscript page holds about 250 words,\n# and adults read fiction at about 250 words a minute.\nwords_per_page = 250\nreading_wpm = 250\n\n# Where `story-time idea` captures ideas, relative to the vault.\nideas_file = \"Scratchpad/Ideas.md\"\n\n# Note templates, shared with Obsidian's core Templates plugin.\ntemplates_dir = \"Templates\"\n\n# Name printed on compiled manuscripts.\n# author = \"Your Name\"\n\n# Spellcheck language(s) for the desktop app's editor, as language_COUNTRY codes.\n# Defaults to the system language.\n# spelling = [\"en_AU\"]\n";
+        assert_eq!(
+            upgraded_config(old),
+            DEFAULT_CONFIG,
+            "story-time 0.1's config"
+        );
+        let upgraded: Config = toml::from_str(&upgraded_config("daily_goal = 900\n")).unwrap();
+        assert_eq!(
+            upgraded,
+            Config {
+                format: FORMAT,
+                daily_goal: 900,
+                ..Config::default()
+            }
+        );
     }
 
     #[test]

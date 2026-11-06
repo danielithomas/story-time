@@ -41,7 +41,7 @@ pub enum Step {
 
 /// Sets up a vault: config, note templates, the folder for Obsidian's Templates plugin and, in a
 /// git repository, `.gitignore` and `.gitattributes` entries. Existing files are kept unless
-/// `overwrite_templates` is set, which replaces only the templates. A vault in a newer format is
+/// `overwrite_templates` is set, which replaces only the templates. A vault in another format is
 /// left untouched.
 pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
     let mut steps = Vec::new();
@@ -49,6 +49,7 @@ pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
     steps.push(write_if_missing(&config_path, DEFAULT_CONFIG)?);
     let config = Config::load(root)?;
     config.ensure_supported()?;
+    config.ensure_current()?;
 
     let templates_dir = root.join(&config.templates_dir);
     for template in templates::ALL {
@@ -81,7 +82,7 @@ pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
 }
 
 /// Adds `line` to the end of a file unless the file already has it.
-fn add_line(path: &Path, line: &str) -> Result<Step> {
+pub(crate) fn add_line(path: &Path, line: &str) -> Result<Step> {
     let existing = fs::read_to_string(path).unwrap_or_default();
     if existing.lines().any(|existing| existing.trim() == line) {
         return Ok(Step::Kept(path.to_path_buf()));
@@ -109,7 +110,7 @@ fn write_if_missing(path: &Path, content: &str) -> Result<Step> {
 }
 
 /// Writes a file that must not already exist.
-fn write_new(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_new(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }

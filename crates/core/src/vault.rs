@@ -241,11 +241,22 @@ pub struct Measured {
 pub(crate) fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     walk(dir, &mut files)?;
-    files.retain(|path| {
-        path.extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-    });
+    files.retain(|path| is_note(path));
     Ok(files)
+}
+
+/// Every file under `dir` outside hidden folders, in natural order of their paths.
+pub(crate) fn files_under(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    walk(dir, &mut files)?;
+    files.sort_by(|a, b| natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()));
+    Ok(files)
+}
+
+/// Whether `path` names a Markdown note.
+pub(crate) fn is_note(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }
 
 fn walk(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
@@ -268,7 +279,7 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn is_hidden(path: &Path) -> bool {
+pub(crate) fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .is_some_and(|name| name.to_string_lossy().starts_with('.'))
 }

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-story-time is a Rust toolkit for a writer's Markdown (Obsidian) vault, with two front ends: the `story-time` CLI and the Story Time desktop app (Tauri, in `apps/desktop`). README.md documents commands and conventions; docs/writing-practice.md explains the reasoning behind the features and lists next steps. docs/vault-format.md is the approved vault format 1 (not yet implemented): change code to match it, and change it only with the owner's approval.
+story-time is a Rust toolkit for a writer's Markdown (Obsidian) vault, with two front ends: the `story-time` CLI and the Story Time desktop app (Tauri, in `apps/desktop`). README.md documents commands and conventions; docs/writing-practice.md explains the reasoning behind the features and lists next steps. docs/vault-format.md is the approved vault format 1, which the code implements: change it only with the owner's approval, and the code with it.
 
 ## Commands
 
@@ -30,6 +30,7 @@ Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pus
 - Names and links: files and folders are kebab-case slugs (`text::slugify`), a note's real name is its `title` or first alias (`Note::title`), and `links.rs` resolves and writes wikilinks. Write links through `LinkIndex::link` so Obsidian can follow them.
 - Word-counting rules live in `words.rs`, and `compile` reuses `words::prose`, so counts and manuscripts agree. Change both together and update the README's "Word counts" paragraph.
 - Built-in templates are `crates/core/templates/*.md`, compiled in with `include_str!`. A vault's `templates/` folder overrides them.
+- `upgrade.rs` converts a vault from story-time 0.1's layout (format 0: a config file without `format`). `plan` decides every move and edit without touching the vault and stops on any clash; `apply` backs the vault up into `.story-time/backups/` first. It never edits the ideas file or templates. `crates/core/templates/format-0/` holds 0.1's templates, so unchanged copies can be replaced. Commands refuse a format-0 vault (`Config::ensure_current`) except `upgrade`; the desktop app shows an upgrade screen instead.
 
 ## Boundaries
 

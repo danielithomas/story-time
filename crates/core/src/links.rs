@@ -193,6 +193,17 @@ impl LinkIndex {
     /// other note in the vault shares the file name, else a path relative to `from`'s folder, so
     /// Obsidian opens the right note either way.
     pub fn link(&self, from: &Path, to: &Path, name: &str) -> String {
+        let target = self.link_target(from, to);
+        if name == target {
+            format!("[[{target}]]")
+        } else {
+            format!("[[{target}|{name}]]")
+        }
+    }
+
+    /// The part of such a link before any `|`: the file name, or a relative path when other notes
+    /// share it.
+    pub fn link_target(&self, from: &Path, to: &Path) -> String {
         let stem = to
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -201,14 +212,9 @@ impl LinkIndex {
             .stems
             .get(&stem.to_lowercase())
             .map_or(0, |paths| paths.iter().filter(|path| *path != to).count());
-        let target = match (others, from.parent()) {
+        match (others, from.parent()) {
             (1.., Some(dir)) => relative_path(dir, &to.with_extension("")),
             _ => stem,
-        };
-        if name == target {
-            format!("[[{target}]]")
-        } else {
-            format!("[[{target}|{name}]]")
         }
     }
 }

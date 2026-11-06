@@ -1,6 +1,6 @@
 # The vault format
 
-**Status: approved 2026-11-05, not yet implemented.** Until it is, story-time reads the older, unversioned layout described in the README.
+**Status: approved 2026-11-05, implemented in story-time 0.2.** `story-time upgrade` converts a vault from the unversioned layout of story-time 0.1.
 
 This document is the contract between story-time and a writer's vault: what goes where, what each note holds, and which parts story-time reads and writes. It is format **1**. Before story-time 1.0, any change to this document raises the minor version; after 1.0, the major version.
 

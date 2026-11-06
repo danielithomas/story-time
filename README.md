@@ -57,6 +57,7 @@ Option 4 makes every command work from any directory, which helps if the vault m
 | `research add "Subject" [-p project] [--source S] [--text TEXT\|-] [--agent]` | Adds a research note to the vault's `research/`, or with `-p` a project's, named like other notes. `--source` is a URL or citation. `--text` gives the note's text instead of the template's prompt (`-` reads it from standard input). `--agent` marks a note an agent wrote: it opens with a callout asking you to check it against its source. |
 | `check [project]` | World-bible gaps across all of a project's books: links to notes that don't exist yet, character, location and world notes whose name never appears in a scene, and scenes missing a status or synopsis. Also entries in `## Books` or `## Contents` that aren't a book or scene there, scenes listed twice, links Obsidian can't follow to a single note, and file names that aren't kebab-case or no longer match the note's name. |
 | `compile [project] [-b book] [--format md\|docx\|epub\|html\|pdf] [-o path]` | The scenes a book's contents list, in order, as one manuscript minus notes-to-self: a heading for each part and chapter, and `***` between scenes. Unplaced scenes are left out. Defaults to `.story-time/build/<project>/<book>.<format>`. |
+| `upgrade [--dry-run]` | Converts a vault from story-time 0.1's layout to the current one, after copying it into `.story-time/backups/<date-time>/`. `--dry-run` lists the changes without making them. See "Upgrading from 0.1" below. |
 
 Without a project argument, commands other than `stats`, `scrap` and `research` use the project folder you are in, or the only project in the vault; `scrap` and `research` use the vault's own folders unless given `-p`. Otherwise give its slug, title, or an unambiguous part of either (`stats sample`). Books work the same way with `-b`: the book folder you are in, else the project's only book.
 
@@ -106,7 +107,18 @@ A list item that isn't a link is a chapter, titled by its text (`Chapter` for an
 
 **Templates** in the vault's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{flow_link}}`, `{{timeline_link}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
 
-**The vault format.** `docs/vault-format.md` specifies the next version of this layout, which isn't implemented yet. story-time refuses to open a vault whose `.story-time/config.toml` has a `format` newer than it understands, rather than misread or change it.
+**The vault format.** `docs/vault-format.md` specifies this layout, format 1, and `format = 1` in `.story-time/config.toml` records it. story-time refuses to open a vault whose `format` is newer than it understands, rather than misread or change it. A config file without `format` comes from story-time 0.1: commands stop and ask you to run `story-time upgrade`. A vault with no config file is new, and `init` sets it up.
+
+**Upgrading from 0.1.** `story-time upgrade` (or the desktop app, when it opens such a vault) first copies the vault, apart from `.git/` and compiled output, into `.story-time/backups/<date-time>/`, which a git vault's `.gitignore` then leaves out. Then it:
+
+- moves the ideas file to `scratchpad/ideas.md` exactly as it is, and other notes in `Scratchpad/` to `scratchpad/` as scraps;
+- replaces 0.1's templates with the new ones in `templates/`. A template you changed is kept as `templates/old-<name>.md`, and any of your own move across under a kebab-case name;
+- turns each project into a world with one book. `sample-story/` becomes `sample-story-world/`: the project note becomes the book's note in `books/sample-story/` (with the story flow), each chapter becomes a scene listed in the book's contents as a chapter titled as before, in the same order, and characters, locations and world notes move into `bible/`. A new project note lists the book, and a timeline note is added;
+- renames notes to kebab-case, keeping each note's name as its first alias, and rewrites links to notes that moved so Obsidian still follows them. The ideas file and templates are never edited;
+- updates `config.toml` (keeping your settings and comments) and points Obsidian's Templates plugin at `templates/`;
+- records a last count in the writing log under each project's old name and a first one under each book's new `id`, so no words are lost or counted twice.
+
+Nothing is changed if a file is in the way of a move; the upgrade says which. To undo an upgrade, put the backup's contents back.
 
 **The writing log** is `.story-time/history.csv`. Each time `stats`, `today`, `history` or `snapshot` runs, it appends a line for every book and scratchpad whose count changed, recorded under the book's `id` so renaming the book or its project keeps its history. A project's scratchpad is recorded under the project's `id`, and the vault's as `scratchpad`. (A book without an `id` is recorded as `<project>/<book>`, a project's scratchpad as `<project>/scratchpad`.) Moving a scene into a scratchpad doesn't count as writing or as words lost. Words written on a day are the net change from the previous snapshot, so deleting words counts against the day. If you write without running a command, those words count toward the next day you do. To log every day, schedule a snapshot:
 
