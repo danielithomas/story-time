@@ -5,6 +5,7 @@
   let upgrading = $state(false);
   let name = $state("Stories");
   let place = $state("");
+  let example = $state(true);
   let busy = $state(false);
   let error = $state("");
 
@@ -27,7 +28,7 @@
     busy = true;
     error = "";
     try {
-      await startBookshelf(place, name);
+      await startBookshelf(place, name, example);
     } catch (e) {
       error = String(e);
     } finally {
@@ -92,6 +93,10 @@
           </div>
         </div>
         <p class="hint">Put it in a OneDrive, Dropbox or iCloud folder to have it on all your computers.</p>
+        <label class="check">
+          <input type="checkbox" bind:checked={example} />
+          <span>Add an example book to look around in. Its scenes explain how Story Time works; delete it when you're done.</span>
+        </label>
         {#if error}
           <p class="error">{error}</p>
         {/if}
@@ -169,6 +174,13 @@
     margin-top: -0.4rem;
     font-size: 12px;
     color: var(--muted);
+  }
+
+  .check {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 14px;
   }
 
   .error {

@@ -48,6 +48,9 @@ enum Command {
         /// Replace existing templates with the built-in versions.
         #[arg(long)]
         force: bool,
+        /// Add an example world with one short book whose scenes explain how story-time works.
+        #[arg(long)]
+        example: bool,
     },
     /// Start a book: in a new project (a world, with its world bible), or with --in, in an
     /// existing one.
@@ -240,11 +243,11 @@ fn run(cli: Cli) -> Result<()> {
     let bookshelf = cli
         .bookshelf
         .or_else(|| env::var_os("STORY_TIME_VAULT").map(PathBuf::from));
-    if let Command::Init { force } = cli.command {
-        return commands::init(&bookshelf.unwrap_or(cwd), force);
+    let now = Local::now().naive_local();
+    if let Command::Init { force, example } = cli.command {
+        return commands::init(&bookshelf.unwrap_or(cwd), force, example, now);
     }
     let vault = Vault::discover(bookshelf.as_deref(), &cwd)?;
-    let now = Local::now().naive_local();
     if let Command::Upgrade { dry_run } = cli.command {
         return commands::upgrade(&vault, dry_run, now);
     }

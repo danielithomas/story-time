@@ -344,7 +344,7 @@ fn create_book(
 }
 
 /// Every project's and book's ID, so a new one can avoid them.
-fn taken_ids(vault: &Vault) -> Result<HashSet<String>> {
+pub(crate) fn taken_ids(vault: &Vault) -> Result<HashSet<String>> {
     let mut taken = HashSet::new();
     for project in vault.projects()? {
         taken.extend(project.id());

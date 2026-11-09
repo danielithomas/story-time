@@ -172,10 +172,13 @@ export async function chooseBookshelfPlace(current: string): Promise<string | nu
   return typeof picked === "string" ? picked : null;
 }
 
-/** Makes a new bookshelf and opens it. Errors are left to the caller, which shows them in its form. */
-export async function startBookshelf(place: string, name: string) {
+/**
+ * Makes a new bookshelf, with the example world if asked, and opens it. Errors are left to the
+ * caller, which shows them in its form.
+ */
+export async function startBookshelf(place: string, name: string, example: boolean) {
   if (!(await settle())) return;
-  app.vault = await api.createBookshelf(place, name);
+  app.vault = await api.createBookshelf(place, name, example);
   app.starting = false;
   app.view = "write";
   await enterVault();

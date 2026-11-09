@@ -32,6 +32,7 @@ Releases are built by `.github/workflows/release.yml` when a `vX.Y.Z` tag is pus
 - Names and links: files and folders are kebab-case slugs (`text::slugify`), a note's real name is its `title` or first alias (`Note::title`), and `links.rs` resolves and writes wikilinks. Write links through `LinkIndex::link` so Obsidian can follow them.
 - Word-counting rules live in `words.rs`, and `compile` reuses `words::prose`, so counts and manuscripts agree. Change both together and update the README's "Word counts" paragraph.
 - Built-in templates are `crates/core/templates/*.md`, compiled in with `include_str!`. A vault's `templates/` folder overrides them.
+- `example.rs` adds the example world (`init --example`, and Start a bookshelf in the app). Its notes are in `crates/core/example/`, laid out as on the bookshelf. They describe the app, so keep them true when features change, and passing `check` (a test does that).
 - `upgrade.rs` converts a vault from story-time 0.1's layout (format 0: a config file without `format`). `plan` decides every move and edit without touching the vault and stops on any clash; `apply` backs the vault up into `.story-time/backups/` first. It never edits the ideas file or templates. `crates/core/templates/format-0/` holds 0.1's templates, so unchanged copies can be replaced. Commands refuse a format-0 vault (`Config::ensure_current`) except `upgrade`; the desktop app shows an upgrade screen instead.
 
 ## Boundaries

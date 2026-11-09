@@ -9,6 +9,7 @@ use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
 use story_time_core::config::FORMAT;
 use story_time_core::contents::Place;
+use story_time_core::example;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
@@ -19,7 +20,7 @@ use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
 use crate::output::{Align, Table, bar, percent, plural, signed, thousands, wrap};
 
-pub fn init(root: &Path, force: bool) -> Result<()> {
+pub fn init(root: &Path, force: bool, example: bool, now: NaiveDateTime) -> Result<()> {
     let root = root
         .canonicalize()
         .with_context(|| format!("{} not found", root.display()))?;
@@ -42,6 +43,14 @@ pub fn init(root: &Path, force: bool) -> Result<()> {
     {
         println!(
             "\nObsidian's Templates plugin now reads from the templates folder (restart Obsidian if it is open)."
+        );
+    }
+    if example {
+        let dir = example::add_example(&Vault::open(&root)?, now)?;
+        println!(
+            "\nAdded {}/, an example world with a short book whose scenes explain how story-time \
+             works. Delete the folder when you're done with it.",
+            dir.strip_prefix(&root).unwrap_or(&dir).display()
         );
     }
     Ok(())

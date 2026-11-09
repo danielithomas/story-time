@@ -326,6 +326,23 @@ fn helpful_errors() {
 }
 
 #[test]
+fn the_example_book() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let init = ok(root, &["init", "--example"]);
+    assert!(init.contains("Added example-world/"), "{init}");
+    let check = ok(root, &["check"]);
+    assert!(check.contains("Nothing to report."), "{check}");
+    let today = ok(root, &["today"]);
+    assert!(
+        today.contains("0 words"),
+        "its words aren't today's: {today}"
+    );
+    let again = run(root, &["init", "--example"]);
+    assert!(!again.status.success(), "only once");
+}
+
+#[test]
 fn finds_the_bookshelf_by_its_old_names_too() {
     let dir = vault();
     let shelf = dir.path().to_str().unwrap();

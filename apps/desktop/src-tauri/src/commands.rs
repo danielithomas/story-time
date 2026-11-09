@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use story_time_core::compile::{self, Format};
 use story_time_core::contents::{Contents, Place};
+use story_time_core::example;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::links::LinkIndex;
@@ -550,15 +551,20 @@ pub fn default_bookshelf_place(app: AppHandle) -> CmdResult<String> {
     Ok(place.map_err(|e| e.to_string())?.display().to_string())
 }
 
-/// Makes a new bookshelf called `name` in `place`, then opens it.
+/// Makes a new bookshelf called `name` in `place`, with the example world if asked, then opens it.
 #[tauri::command]
 pub async fn create_bookshelf(
     place: String,
     name: String,
+    example: bool,
     state: State<'_, AppState>,
     window: WebviewWindow,
 ) -> CmdResult<VaultInfo> {
     let root = scaffold::create_bookshelf(Path::new(&place), &name).or_message()?;
+    if example {
+        let vault = Vault::open(&root).or_message()?;
+        example::add_example(&vault, Local::now().naive_local()).or_message()?;
+    }
     enter(&root, &state, &window)
 }
 

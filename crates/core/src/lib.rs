@@ -13,6 +13,7 @@ pub mod check;
 pub mod compile;
 pub mod config;
 pub mod contents;
+pub mod example;
 pub mod history;
 pub mod ideas;
 pub mod ids;
