@@ -8,6 +8,20 @@ export interface VaultInfo {
   needsUpgrade: boolean;
 }
 
+/** What the Settings screen shows: the bookshelf's own settings, and this computer's for backups. */
+export interface SettingsInfo {
+  dailyGoal: number;
+  author: string;
+  spelling: string[];
+  backup: boolean;
+  /** Where this bookshelf's copies go. */
+  backupFolder: string;
+  /** The writer chose that folder, rather than Story Time's data folder. */
+  chosenBackupFolder: boolean;
+  /** The newest copy, if there is one. */
+  lastBackup: string | null;
+}
+
 /** A folder the writer picked, before it opens. */
 export interface FolderInfo {
   path: string;

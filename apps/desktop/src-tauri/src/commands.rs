@@ -593,6 +593,89 @@ fn enter(root: &Path, state: &AppState, window: &WebviewWindow) -> CmdResult<Vau
     Ok(vault_info(&vault))
 }
 
+/// What the Settings screen shows: the bookshelf's own settings, and this computer's for backups.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsInfo {
+    daily_goal: u64,
+    author: String,
+    spelling: Vec<String>,
+    backup: bool,
+    /// Where this bookshelf's copies go.
+    backup_folder: String,
+    /// Whether that is a folder the writer chose, rather than Story Time's data folder.
+    chosen_backup_folder: bool,
+    /// The newest copy, if there is one.
+    last_backup: Option<String>,
+}
+
+#[tauri::command]
+pub async fn settings(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
+    let vault = state.vault()?;
+    let user = config::UserConfig::load().or_message()?;
+    let chosen = user.backup_folder();
+    let folder = backup::folder(&vault, chosen.as_deref()).or_message()?;
+    let last_backup = backup::copies(&folder).or_message()?.into_iter().next();
+    Ok(SettingsInfo {
+        daily_goal: vault.config.daily_goal,
+        author: vault.config.author.clone().unwrap_or_default(),
+        spelling: vault.config.spelling.clone().unwrap_or_default(),
+        backup: user.backs_up(),
+        backup_folder: folder.display().to_string(),
+        chosen_backup_folder: chosen.is_some(),
+        last_backup: last_backup.map(|path| path.display().to_string()),
+    })
+}
+
+/// Saves the bookshelf's settings in its config file, keeping the file's comments. An empty author
+/// or spelling list is unset, so the defaults apply.
+#[tauri::command]
+pub async fn save_settings(
+    daily_goal: u64,
+    author: String,
+    spelling: Vec<String>,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+) -> CmdResult<VaultInfo> {
+    let root = state.vault()?.root;
+    let author = Some(author.trim()).filter(|author| !author.is_empty());
+    let spelling: Vec<toml::Value> = spelling
+        .iter()
+        .map(|code| code.trim())
+        .filter(|code| !code.is_empty())
+        .map(|code| toml::Value::String(code.to_string()))
+        .collect();
+    let spelling = (!spelling.is_empty()).then_some(toml::Value::Array(spelling));
+    let goal =
+        i64::try_from(daily_goal).map_err(|_| "That daily goal is too large.".to_string())?;
+    for (key, value) in [
+        ("daily_goal", Some(toml::Value::Integer(goal))),
+        (
+            "author",
+            author.map(|author| toml::Value::String(author.to_string())),
+        ),
+        ("spelling", spelling),
+    ] {
+        config::set_bookshelf_setting(&root, key, value).or_message()?;
+    }
+    let vault = state.vault()?;
+    apply_spelling(&window, spelling_languages(&vault));
+    Ok(vault_info(&vault))
+}
+
+/// Saves this computer's backup settings: whether the app backs up by itself, and where copies go
+/// (`None` for Story Time's data folder).
+#[tauri::command]
+pub async fn set_backup(
+    on: bool,
+    folder: Option<String>,
+    state: State<'_, AppState>,
+) -> CmdResult<SettingsInfo> {
+    config::set_user_setting("backup", Some(toml::Value::Boolean(on))).or_message()?;
+    config::set_user_setting("backup_folder", folder.map(toml::Value::String)).or_message()?;
+    settings(state).await
+}
+
 /// Backs up the open bookshelf, if this computer does: with `daily`, only when there is no copy
 /// from today yet. Returns the copy made, if one was.
 #[tauri::command]

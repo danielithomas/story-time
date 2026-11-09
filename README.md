@@ -137,12 +137,13 @@ Story Time is a dedicated writing program laid out like Scrivener. The first tim
 - **Inspector** (right): the open note's properties, such as a scene's place in the book, status, point of view, location, time and synopsis, a book's status, form, target and deadline, a world's genres, or a research note's source.
 - **Views:** *Board* (scene cards with synopses, grouped by chapter), *Progress* (target, deadline pacing, last 30 days, scenes by status), *Check* (world-bible gaps, with one-click "create this note"), *Ideas* (capture ideas, or start a project from one).
 - **Focus mode** (F11, Esc to leave): just the page, full screen.
+- **Settings** (click the bookshelf's name in the top bar, or Ctrl+,): the bookshelf's daily goal, author name and spelling languages, saved in its `.story-time/config.toml` with the file's comments kept; where the bookshelf is, opening another or starting a new one; and, for this computer, backups and the colours (the system's, light or dark).
 
 Writing saves itself a moment after you stop typing. Before every save, Story Time checks that the file hasn't changed on disk since it was opened, for example in Obsidian or through OneDrive sync. If it has, nothing is overwritten: you choose which version to keep. Switching back to the window reloads a note that was edited elsewhere.
 
-**Backups.** The app backs the open bookshelf up by itself: once a day while it's open and again when it closes, unless nothing has changed. Each copy is a zip of the whole bookshelf, apart from `.git/` and compiled output, kept outside the bookshelf so a synced folder doesn't upload it and git doesn't see it. A later copy replaces that day's earlier one, and the copies from the 30 most recent days that have one are kept. To restore, unzip what you need. These are settings for each computer, in `~/.config/story-time/config.toml`: `backup = false` turns automatic backups off, and `backup_folder = "..."` puts them elsewhere, such as a USB drive or another cloud folder, so one lost disk doesn't take both.
+**Backups.** The app backs the open bookshelf up by itself: once a day while it's open and again when it closes, unless nothing has changed. Each copy is a zip of the whole bookshelf, apart from `.git/` and compiled output, kept outside the bookshelf so a synced folder doesn't upload it and git doesn't see it. A later copy replaces that day's earlier one, and the copies from the 30 most recent days that have one are kept. To restore, unzip what you need. Settings for each computer, in the app's Settings or `~/.config/story-time/config.toml`, turn automatic backups off (`backup = false`) or put them elsewhere (`backup_folder = "..."`), such as a USB drive or another cloud folder, so one lost disk doesn't take both.
 
-Shortcuts: Ctrl+S save now, Ctrl+1–5 switch views, Ctrl+F find, F11 focus mode.
+Shortcuts: Ctrl+S save now, Ctrl+1–5 switch views, Ctrl+, settings, Ctrl+F find, F11 focus mode.
 
 ### Running it
 
@@ -201,7 +202,7 @@ Development builds (`npm run tauri dev`) read three optional variables, handled 
 
 | Variable | Effect |
 |---|---|
-| `VITE_START_VIEW=board` | Open straight into a view (`write`, `board`, `progress`, `check`, `ideas`, `focus`, `new-project`, `new-book`). |
+| `VITE_START_VIEW=board` | Open straight into a view (`write`, `board`, `progress`, `check`, `ideas`, `settings`, `focus`, `new-project`, `new-book`). |
 | `VITE_SNAPSHOT_DIR=/tmp/shots` | Tour every screen and save a PNG of each, made by WebKitGTK from the window's own contents (Linux only). With no bookshelf set, it shows the screens before one opens: welcome, starting a bookshelf, and asking before setting up a folder. Along the way it types a test sentence into the open note through the editor, which exercises autosave. |
 | `VITE_THEME=light` | Use the light palette whatever the system prefers. |
 

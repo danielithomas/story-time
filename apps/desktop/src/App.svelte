@@ -8,6 +8,7 @@
   import Inspector from "./components/Inspector.svelte";
   import NewProject from "./components/NewProject.svelte";
   import Progress from "./components/Progress.svelte";
+  import Settings from "./components/Settings.svelte";
   import StatusBar from "./components/StatusBar.svelte";
   import Toasts from "./components/Toasts.svelte";
   import TopBar from "./components/TopBar.svelte";
@@ -23,7 +24,7 @@
 
 {#if !app.ready}
   <div class="loading"></div>
-{:else if !app.vault || app.vault.needsUpgrade || app.pendingFolder}
+{:else if !app.vault || app.vault.needsUpgrade || app.pendingFolder || app.starting}
   <Welcome />
 {:else}
   <div class="shell {layout}">
@@ -34,6 +35,8 @@
     <main>
       {#if app.view === "ideas"}
         <Ideas />
+      {:else if app.view === "settings"}
+        <Settings />
       {:else if !app.slug}
         <div class="start">
           <h1>An empty bookshelf</h1>

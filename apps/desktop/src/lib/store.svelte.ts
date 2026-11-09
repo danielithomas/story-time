@@ -25,7 +25,12 @@ import type {
   VaultInfo,
 } from "./types";
 
-export type View = "write" | "board" | "progress" | "check" | "ideas";
+/** The views; Settings isn't one of the tabs, and opens from the bookshelf's name or Ctrl+,. */
+export type View = "write" | "board" | "progress" | "check" | "ideas" | "settings";
+
+/** The app's colours: the system's, or always light or dark. Kept for this computer only. */
+export type Theme = "system" | "light" | "dark";
+const THEME_KEY = "story-time:theme";
 
 export const VIEWS: { key: View; label: string; needsProject: boolean }[] = [
   { key: "write", label: "Write", needsProject: true },
@@ -46,6 +51,7 @@ interface Toast {
 
 export const app = $state({
   ready: false,
+  theme: (localStorage.getItem(THEME_KEY) ?? "system") as Theme,
   vault: null as VaultInfo | null,
   /** The welcome screen's form for starting a bookshelf is showing. */
   starting: false,
@@ -89,6 +95,7 @@ const hasPending = () => bodyDirty || Object.keys(pendingProperties).length > 0;
 // ---- Starting up and choosing a folder ----
 
 export async function init() {
+  applyTheme();
   try {
     app.choices = await api.choices();
     app.vault = await api.vaultStatus();
@@ -149,6 +156,27 @@ async function enterVault() {
   }
   await refreshToday();
   void backUp(true);
+}
+
+export function setTheme(theme: Theme) {
+  app.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme();
+}
+
+function applyTheme() {
+  if (app.theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = app.theme;
+}
+
+/** Saves the bookshelf's settings, then shows the new daily goal. */
+export async function saveSettings(settings: { dailyGoal: number; author: string; spelling: string[] }) {
+  try {
+    app.vault = await api.saveSettings(settings);
+    await refreshToday();
+  } catch (error) {
+    toastError(error);
+  }
 }
 
 /** Opens a bookshelf the writer picks. A folder holding other things waits for them to agree first. */
@@ -563,6 +591,9 @@ function onKey(event: KeyboardEvent) {
     void toggleFocus();
   } else if (event.key === "Escape" && app.focus && !document.querySelector(".cm-panel")) {
     void toggleFocus(false);
+  } else if (mod && event.key === ",") {
+    event.preventDefault();
+    app.view = "settings";
   } else if (mod && !event.shiftKey && /^[1-5]$/.test(event.key)) {
     const view = VIEWS[Number(event.key) - 1];
     if (!view.needsProject || app.slug) {

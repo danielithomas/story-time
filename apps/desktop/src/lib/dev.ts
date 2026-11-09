@@ -1,7 +1,7 @@
 // Development-only helpers for checking screens without clicking through them. Loaded by
 // init() only when running `npm run tauri dev`; release builds never include this file.
 //
-//   VITE_START_VIEW=board npm run tauri dev         open straight into a view (or focus, new-project, new-book)
+//   VITE_START_VIEW=board npm run tauri dev         open straight into a view (or settings, focus, new-project, new-book)
 //   VITE_SNAPSHOT_DIR=/tmp/shots npm run tauri dev  save a PNG of every screen, typing a test
 //                                                   sentence into the open note along the way
 //   VITE_THEME=light npm run tauri dev              use the light palette whatever the system says
@@ -45,6 +45,7 @@ async function startView(start: string) {
   if (start === "focus") await toggleFocus(true);
   else if (start === "new-project") openNewProject();
   else if (start === "new-book") openNewBook();
+  else if (start === "settings") app.view = "settings";
   else if (VIEWS.some((view) => view.key === start)) app.view = start as View;
 }
 
@@ -84,6 +85,7 @@ async function snapshotTour(dir: string) {
     ["progress", () => (app.view = "progress")],
     ["check", () => (app.view = "check")],
     ["ideas", () => (app.view = "ideas")],
+    ["settings", () => (app.view = "settings")],
     ["new-project", () => openNewProject()],
     [
       "new-book",

@@ -29,7 +29,25 @@
   color-scheme: light;
 }
 
-/* Follows the system, unless data-theme="light" on <html> asks otherwise. */
+/* The dark palette: chosen in Settings, or following the system unless Light is chosen. The two
+   blocks hold the same colours; keep them in step. */
+:root[data-theme="dark"] {
+  --bg: #1b1a18;
+  --paper: #21201d;
+  --panel: #2a2824;
+  --line: #36332e;
+  --text: #e8e2d6;
+  --text-soft: #cfc7b9;
+  --muted: #8f877a;
+  --accent: #72b5ab;
+  --accent-text: #14211f;
+  --accent-soft: #233d39;
+  --selection: #2e4945;
+  --danger: #e07b66;
+  --danger-soft: #3d2520;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #1b1a18;

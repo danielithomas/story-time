@@ -1,7 +1,6 @@
 <script lang="ts">
   import {
     app,
-    chooseVault,
     compile,
     openNewBook,
     openNewProject,
@@ -28,7 +27,7 @@
 
 <header class="top">
   <div class="left">
-    <button class="vault" title="{app.vault?.path} (click to change)" onclick={chooseVault}>
+    <button class="vault" title="Settings (Ctrl+,)" onclick={() => (app.view = "settings")}>
       {app.vault?.name}
     </button>
     {#if app.projects.length}
