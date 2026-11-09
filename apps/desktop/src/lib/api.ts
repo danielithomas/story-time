@@ -31,6 +31,8 @@ export const api = {
   openVault: (path: string) => invoke<VaultInfo>("open_vault", { path }),
   /** Returns where the backup of the folder as it was is kept. */
   upgradeVault: () => invoke<string>("upgrade_vault"),
+  /** Returns the copy made, if one was. */
+  backUp: (daily: boolean) => invoke<string | null>("back_up", { daily }),
   choices: () => invoke<Choices>("choices"),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   projectTree: (slug: string, book: string | null) => invoke<ProjectTree>("project_tree", { slug, book }),

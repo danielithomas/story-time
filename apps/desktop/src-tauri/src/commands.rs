@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use chrono::{Days, Local};
 use serde::Serialize;
 use serde_json::{Map, Value};
+use story_time_core::backup;
 use story_time_core::compile::{self, Format};
 use story_time_core::contents::{Contents, Place};
 use story_time_core::example;
@@ -590,6 +591,24 @@ fn enter(root: &Path, state: &AppState, window: &WebviewWindow) -> CmdResult<Vau
     state.remember(vault.root.clone());
     apply_spelling(window, spelling_languages(&vault));
     Ok(vault_info(&vault))
+}
+
+/// Backs up the open bookshelf, if this computer does: with `daily`, only when there is no copy
+/// from today yet. Returns the copy made, if one was.
+#[tauri::command]
+pub async fn back_up(daily: bool, state: State<'_, AppState>) -> CmdResult<Option<String>> {
+    let vault = state.vault()?;
+    let user = config::UserConfig::load().or_message()?;
+    if !user.backs_up() {
+        return Ok(None);
+    }
+    let folder = backup::folder(&vault, user.backup_folder().as_deref()).or_message()?;
+    let now = Local::now().naive_local();
+    if daily && backup::has_copy(&folder, now.date()) {
+        return Ok(None);
+    }
+    let copy = backup::back_up(&vault, &folder, now).or_message()?;
+    Ok(copy.map(|path| path.display().to_string()))
 }
 
 /// Upgrades the open vault to the current format, after backing it up. Returns where the backup is,

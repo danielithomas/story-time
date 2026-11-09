@@ -101,6 +101,7 @@ export async function init() {
 
   setInterval(() => {
     if (app.vault && !app.vault.needsUpgrade) api.recordSnapshot().catch(() => {});
+    void backUp(true);
   }, SNAPSHOT_EVERY);
   window.addEventListener("focus", () => void reloadIfChangedElsewhere());
   window.addEventListener("keydown", onKey);
@@ -112,7 +113,26 @@ export async function init() {
       return;
     }
     if (app.vault && !app.vault.needsUpgrade) await api.recordSnapshot().catch(() => {});
+    await backUp(false);
   });
+}
+
+let backupError = "";
+
+/**
+ * Backs up the open bookshelf, if this computer does: with `daily`, only when there's no copy from
+ * today yet. A failure is shown once, not every time it recurs.
+ */
+async function backUp(daily: boolean) {
+  if (!app.vault || app.vault.needsUpgrade) return;
+  try {
+    await api.backUp(daily);
+    backupError = "";
+  } catch (error) {
+    const message = `Couldn't back up this bookshelf: ${error}`;
+    if (message !== backupError) toast(message, undefined, "error");
+    backupError = message;
+  }
 }
 
 async function enterVault() {
@@ -128,6 +148,7 @@ async function enterVault() {
     clearDoc();
   }
   await refreshToday();
+  void backUp(true);
 }
 
 /** Opens a bookshelf the writer picks. A folder holding other things waits for them to agree first. */

@@ -64,7 +64,7 @@ Science fiction and fantasy novels from new authors typically run 90,000–120,0
 
 ## 7. Backups and versions
 
-The 3-2-1 rule: three copies, on two kinds of media, one off-site. A bookshelf in git with a remote such as GitHub meets it: the working copy, the local history and the remote. Git commits also give you what Scrivener calls *snapshots*: every earlier version of every scene.
+The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop app backs a bookshelf up by itself, a zip a day for the last 30 days that have one, outside the bookshelf; pointing `backup_folder` at a drive or cloud folder of its own makes those copies a second medium or off-site. A bookshelf in git with a remote such as GitHub meets it: the working copy, the local history and the remote. Git commits also give you what Scrivener calls *snapshots*: every earlier version of every scene.
 
 - The obsidian-git plugin commits and syncs on a timer (`autoSaveInterval`, in minutes), and only while Obsidian is open. Work done between syncs, or with Obsidian closed, exists only locally until the next sync. A shorter interval narrows that window.
 - **OneDrive** works fine for a plain folder, and story-time doesn't care where the bookshelf lives. Don't put a *git repository* inside a synced folder, though: two sync engines working on `.git/` can corrupt it. Choose git with GitHub, or OneDrive, for a given folder. On Linux there is no official OneDrive client; the usual choices are the open-source `onedrive` client (abraunegg) or `rclone`.

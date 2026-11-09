@@ -145,6 +145,9 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Back up the bookshelf now, as a zip with the copies the desktop app makes each day: in
+    /// Story Time's data folder, or `backup_folder` in ~/.config/story-time/config.toml.
+    Backup,
     /// Stitch the scenes a book's contents list into one manuscript.
     Compile {
         project: Option<String>,
@@ -314,6 +317,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Today => commands::today(&vault, now),
         Command::History { days } => commands::history(&vault, days, now),
         Command::Snapshot => vault.snapshot(now).map(drop),
+        Command::Backup => commands::backup(&vault, now),
         Command::Idea { text, non_fiction } => commands::idea(&vault, &text.join(" "), non_fiction),
         Command::Scrap {
             action:

@@ -30,6 +30,7 @@ fn main() {
             commands::create_bookshelf,
             commands::open_vault,
             commands::upgrade_vault,
+            commands::back_up,
             commands::choices,
             commands::list_projects,
             commands::project_tree,

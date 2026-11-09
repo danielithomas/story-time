@@ -196,12 +196,41 @@ fn setting(line: &str) -> Option<&str> {
     line.split_once('=').map(|(key, _)| key.trim())
 }
 
-/// Per-machine settings, so commands find the bookshelf from any directory (for example one kept on
-/// OneDrive). Before 0.3 the key was `vault`, which still works.
+/// Per-machine settings: the default bookshelf, so commands find it from any directory (for
+/// example one kept on OneDrive), and how this computer backs bookshelves up. Before 0.3 the
+/// bookshelf's key was `vault`, which still works.
 #[derive(Debug, Default, Deserialize)]
-struct UserConfig {
+pub struct UserConfig {
     #[serde(alias = "vault")]
     bookshelf: Option<String>,
+    /// Whether the app backs up the open bookshelf by itself. On unless set to false.
+    backup: Option<bool>,
+    /// Where backups go, instead of Story Time's data folder.
+    backup_folder: Option<String>,
+}
+
+impl UserConfig {
+    /// The user config file's settings, or the defaults if there is no file.
+    pub fn load() -> Result<UserConfig> {
+        let Some(path) = user_config_path().filter(|path| path.is_file()) else {
+            return Ok(UserConfig::default());
+        };
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn bookshelf(&self) -> Option<PathBuf> {
+        self.bookshelf.as_deref().map(expand_home)
+    }
+
+    pub fn backs_up(&self) -> bool {
+        self.backup.unwrap_or(true)
+    }
+
+    pub fn backup_folder(&self) -> Option<PathBuf> {
+        self.backup_folder.as_deref().map(expand_home)
+    }
 }
 
 /// `~/.config/story-time/config.toml` on Linux; the platform equivalent elsewhere.
@@ -211,34 +240,68 @@ pub fn user_config_path() -> Option<PathBuf> {
 
 /// The `bookshelf` set in the user config file, if there is one.
 pub fn user_default_vault() -> Result<Option<PathBuf>> {
-    let Some(path) = user_config_path().filter(|path| path.is_file()) else {
-        return Ok(None);
-    };
-    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let config: UserConfig =
-        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(config.bookshelf.map(|path| expand_home(&path)))
+    Ok(UserConfig::load()?.bookshelf())
 }
 
-/// Remembers `vault` as this machine's default bookshelf, keeping anything else in the user
-/// config file.
+/// Remembers `vault` as this machine's default bookshelf.
 pub fn set_user_default_vault(vault: &Path) -> Result<()> {
+    set_user_setting(
+        "bookshelf",
+        Some(toml::Value::String(vault.display().to_string())),
+    )
+}
+
+/// Sets `key` in the user config file, or with `None` removes it, keeping everything else.
+pub fn set_user_setting(key: &str, value: Option<toml::Value>) -> Result<()> {
     let path = user_config_path().context("this system has no config folder")?;
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let default = format!(
-        "bookshelf = {}",
-        toml::Value::String(vault.display().to_string())
-    );
-    let mut lines: Vec<String> = existing
-        .lines()
-        .filter(|line| !matches!(setting(line.trim_start()), Some("bookshelf" | "vault")))
-        .map(String::from)
-        .collect();
-    lines.insert(0, default);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
-    fs::write(&path, lines.join("\n") + "\n").with_context(|| format!("writing {}", path.display()))
+    fs::write(&path, with_setting(&existing, key, value.as_ref()))
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+/// Sets `key` in a bookshelf's config file, or with `None` unsets it, keeping everything else.
+pub fn set_bookshelf_setting(root: &Path, key: &str, value: Option<toml::Value>) -> Result<()> {
+    let path = root.join(META_DIR).join(CONFIG_FILE);
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    fs::write(&path, with_setting(&text, key, value.as_ref()))
+        .with_context(|| format!("writing {}", path.display()))
+}
+
+/// A config file's `text` with `key` set to `value`, keeping its comments and other settings. The
+/// setting goes where it already is, else on a commented-out line for it (as the default file has
+/// `# author = "Your Name"`), else at the top. With `None` it is commented out. Setting
+/// `bookshelf` also replaces the old `vault` key.
+fn with_setting(text: &str, key: &str, value: Option<&toml::Value>) -> String {
+    let is_key = |found: &str| found == key || (key == "bookshelf" && found == "vault");
+    let sets = |line: &str| setting(line.trim_start()).is_some_and(is_key);
+    let suggests = |line: &str| {
+        line.strip_prefix('#')
+            .and_then(|rest| setting(rest.trim_start()))
+            .is_some_and(is_key)
+    };
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    match value {
+        Some(value) => {
+            let line = format!("{key} = {value}");
+            let at = lines.iter().position(|l| sets(l));
+            match at.or_else(|| lines.iter().position(|l| suggests(l))) {
+                Some(i) => lines[i] = line,
+                None => lines.insert(0, line),
+            }
+            // Any other line setting it, such as an old `vault`, goes.
+            let mut first = true;
+            lines.retain(|l| !sets(l) || std::mem::take(&mut first));
+        }
+        None => {
+            for line in lines.iter_mut().filter(|l| sets(l)) {
+                *line = format!("# {line}");
+            }
+        }
+    }
+    lines.join("\n") + "\n"
 }
 
 fn expand_home(path: &str) -> PathBuf {
@@ -251,6 +314,56 @@ fn expand_home(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_the_user_config_in_place() {
+        let text = "# mine\nvault = \"/old\"\nbackup = true\n";
+        let shelf = toml::Value::String("/stories".into());
+        assert_eq!(
+            with_setting(text, "bookshelf", Some(&shelf)),
+            "# mine\nbookshelf = \"/stories\"\nbackup = true\n"
+        );
+        assert_eq!(
+            with_setting(text, "backup", Some(&toml::Value::Boolean(false))),
+            "# mine\nvault = \"/old\"\nbackup = false\n"
+        );
+        assert_eq!(
+            with_setting(text, "backup_folder", Some(&shelf)),
+            "backup_folder = \"/stories\"\n# mine\nvault = \"/old\"\nbackup = true\n"
+        );
+        assert_eq!(
+            with_setting(text, "backup", None),
+            "# mine\nvault = \"/old\"\n# backup = true\n"
+        );
+        assert_eq!(with_setting("", "backup", None), "\n");
+    }
+
+    #[test]
+    fn edits_a_bookshelf_config_keeping_its_comments() {
+        let name = toml::Value::String("A. Writer".into());
+        let named = with_setting(DEFAULT_CONFIG, "author", Some(&name));
+        assert!(
+            named.contains("# Name printed on compiled manuscripts.\nauthor = \"A. Writer\"\n"),
+            "{named}"
+        );
+        let goal = with_setting(&named, "daily_goal", Some(&toml::Value::Integer(800)));
+        let parsed: Config = toml::from_str(&goal).unwrap();
+        assert_eq!(
+            (parsed.daily_goal, parsed.author.as_deref()),
+            (800, Some("A. Writer"))
+        );
+        let unnamed = with_setting(&goal, "author", None);
+        assert!(
+            unnamed.contains("\n# author = \"A. Writer\"\n"),
+            "{unnamed}"
+        );
+        assert_eq!(toml::from_str::<Config>(&unnamed).unwrap().author, None);
+        assert_eq!(
+            with_setting(&unnamed, "author", Some(&name)),
+            goal,
+            "set again where it was"
+        );
+    }
 
     #[test]
     fn reads_the_default_bookshelf_by_its_old_name_too() {

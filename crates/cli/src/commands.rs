@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{Days, NaiveDateTime};
+use story_time_core::backup;
 use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
-use story_time_core::config::FORMAT;
+use story_time_core::config::{FORMAT, UserConfig};
 use story_time_core::contents::Place;
 use story_time_core::example;
 use story_time_core::history::History;
@@ -52,6 +53,18 @@ pub fn init(root: &Path, force: bool, example: bool, now: NaiveDateTime) -> Resu
              works. Delete the folder when you're done with it.",
             dir.strip_prefix(&root).unwrap_or(&dir).display()
         );
+    }
+    Ok(())
+}
+
+pub fn backup(vault: &Vault, now: NaiveDateTime) -> Result<()> {
+    let folder = backup::folder(vault, UserConfig::load()?.backup_folder().as_deref())?;
+    match backup::back_up(vault, &folder, now)? {
+        Some(copy) => println!("Backed up to {}", copy.display()),
+        None => println!(
+            "Nothing has changed since the last backup, in {}",
+            folder.display()
+        ),
     }
     Ok(())
 }

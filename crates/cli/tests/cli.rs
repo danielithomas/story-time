@@ -342,6 +342,41 @@ fn the_example_book() {
     assert!(!again.status.success(), "only once");
 }
 
+// Only Linux honours XDG_DATA_HOME, so elsewhere this would write to the real data folder.
+#[cfg(target_os = "linux")]
+#[test]
+fn backs_up_outside_the_bookshelf() {
+    let dir = vault();
+    let data = TempDir::new().unwrap();
+    let backup = || {
+        let output = Command::new(env!("CARGO_BIN_EXE_story-time"))
+            .arg("backup")
+            .current_dir(dir.path())
+            .env("XDG_DATA_HOME", data.path())
+            .env("XDG_CONFIG_HOME", data.path())
+            .env_remove("STORY_TIME_BOOKSHELF")
+            .env_remove("STORY_TIME_VAULT")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let first = backup();
+    let shelf = dir.path().file_name().unwrap().to_string_lossy();
+    assert!(
+        first.starts_with(&format!(
+            "Backed up to {}/story-time/backups/{shelf}-",
+            data.path().display()
+        )),
+        "{first}"
+    );
+    assert!(backup().starts_with("Nothing has changed"));
+}
+
 #[test]
 fn finds_the_bookshelf_by_its_old_names_too() {
     let dir = vault();

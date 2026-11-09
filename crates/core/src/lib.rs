@@ -9,6 +9,7 @@
 //! stays readable and editable without it. `docs/bookshelf-format.md` specifies the layout.
 //! Front ends (the CLI and the desktop app) sit on top of this crate.
 
+pub mod backup;
 pub mod check;
 pub mod compile;
 pub mod config;
