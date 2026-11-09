@@ -11,11 +11,15 @@ Obsidian can open a bookshelf as a vault, and an existing Obsidian vault works a
 
 ## Install
 
+Download the installer for your system from the [releases](https://github.com/danielithomas/story-time/releases). That is all most people need: the desktop app does everything the command does.
+
+The `story-time` command is attached to each release too, as an archive for each system: unpack it and put `story-time` in a folder on your PATH. Or build it from source:
+
 ```sh
 cargo install --path crates/cli     # installs the `story-time` binary to ~/.cargo/bin
 ```
 
-Needs Rust 1.90 or later. [pandoc](https://pandoc.org) is optional; it is used only to compile to Word, EPUB, HTML or PDF (PDF also needs a LaTeX engine).
+Building needs Rust 1.90 or later. [pandoc](https://pandoc.org) is optional; it is used only to compile to Word, EPUB, HTML or PDF (PDF also needs a LaTeX engine).
 
 ## Getting started
 

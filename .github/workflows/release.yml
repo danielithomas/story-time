@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the desktop installers for Linux, Windows and macOS and attaches them to a draft
-# GitHub release, which stays private until it is published by hand.
+# Builds the desktop installers for Linux, Windows and macOS, and the story-time command for each,
+# and attaches them to a draft GitHub release, which stays private until it is published by hand.
 #
 # Runs when a version tag such as v0.2.0 is pushed. It can also be run by hand for a tag that
 # already exists (Actions → Release → Run workflow); the source is taken from the tag.
@@ -66,6 +66,8 @@ jobs:
             - **Linux:** install the `.deb` (Ubuntu 22.04, Debian 12 or later) with `sudo apt install ./Story.Time_*.deb`. There is also an `.rpm`, and an `.AppImage` that runs on most distributions after `chmod +x`.
             - **Windows:** run the `-setup.exe`, or the `.msi`. If SmartScreen says "Windows protected your PC", choose **More info**, then **Run anyway**.
             - **macOS:** open the `.dmg` for your Mac (`aarch64` for Apple silicon, `x64` for Intel) and drag Story Time to Applications. If macOS won't open it, choose **Open Anyway** in **System Settings → Privacy & Security**. If it says the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Story Time.app"` once.
+
+            The `story-time` command is optional: the app does everything it does. To use it, download the `story-time-*` archive for your system, unpack it, and put `story-time` (`story-time.exe` on Windows) in a folder on your PATH, such as `~/.local/bin`.
         run: |
           id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
           if [ -z "$id" ]; then
@@ -84,14 +86,18 @@ jobs:
           # The oldest supported Ubuntu, so the packages run on as many distributions as possible.
           - name: Linux
             runner: ubuntu-22.04
+            command: linux-x86_64
           - name: Windows
             runner: windows-latest
+            command: windows-x86_64
           - name: macOS (Apple silicon)
             runner: macos-latest
             target: aarch64-apple-darwin
+            command: macos-aarch64
           - name: macOS (Intel)
             runner: macos-latest
             target: x86_64-apple-darwin
+            command: macos-x86_64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -130,3 +136,21 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           uploadUpdaterJson: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      - name: The story-time command
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+          NAME: story-time-${{ env.TAG }}-${{ matrix.command }}
+        run: |
+          cargo build --release --locked -p story-time ${TARGET:+--target "$TARGET"}
+          mkdir "$NAME"
+          cp "target/${TARGET:+$TARGET/}release/story-time$([ "$RUNNER_OS" = Windows ] && echo .exe)" \
+            README.md LICENSE-MIT LICENSE-APACHE "$NAME/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a "$NAME.zip" "$NAME"
+          else
+            tar -czf "$NAME.tar.gz" "$NAME"
+          fi
+          gh release upload "$TAG" "$NAME".* --clobber
