@@ -5,9 +5,9 @@ Write, organise, measure and compile stories kept as Markdown in a folder you ch
 - **Story Time**, a desktop app for writing (`apps/desktop`, built with Tauri)
 - **`story-time`**, a command-line tool (`crates/cli`)
 
-An Obsidian vault works as-is.
+Your stories live on a **bookshelf**: a folder of plain Markdown files with a few properties (YAML frontmatter). The files are the source of truth. story-time reads them and writes ordinary Markdown back. It keeps no database and no format of its own, so you can stop using it at any time. A bookshelf can live in git, on OneDrive, or anywhere else a folder can.
 
-The vault is the source of truth: plain Markdown files with a few properties (YAML frontmatter). story-time reads them and writes ordinary Markdown back. It keeps no database and no format of its own, so you can stop using it at any time. The vault can live in git, on OneDrive, or anywhere else a folder can.
+Obsidian can open a bookshelf as a vault, and an existing Obsidian vault works as a bookshelf.
 
 ## Install
 
@@ -29,16 +29,16 @@ story-time new "Second Story" --in sample-story   # another book in the same wor
 story-time stats                                  # every book at a glance
 ```
 
-### Finding the vault
+### Finding the bookshelf
 
 Commands use the first of:
 
-1. `--vault <path>`
-2. the `STORY_TIME_VAULT` environment variable
+1. `--bookshelf <path>`
+2. the `STORY_TIME_BOOKSHELF` environment variable
 3. the nearest folder at or above the current directory that holds `.story-time/` or `.obsidian/`
-4. `vault = "~/path/to/stories"` in `~/.config/story-time/config.toml`
+4. `bookshelf = "~/path/to/stories"` in `~/.config/story-time/config.toml`
 
-Option 4 makes every command work from any directory, which helps if the vault moves somewhere like `~/OneDrive/stories`.
+Option 4 makes every command work from any directory, which helps if the bookshelf moves somewhere like `~/OneDrive/stories`.
 
 ## Commands
 
@@ -53,19 +53,19 @@ Option 4 makes every command work from any directory, which helps if the vault m
 | `history [--days N]` | Words written per day. |
 | `snapshot` | Records word counts silently, for a cron job or git hook. |
 | `idea Name: description [--non-fiction]` | Appends an idea under `### Fiction` (or `### Non-Fiction`) in the ideas file, in the list style already there. |
-| `scrap add TEXT\|- [-p project] [--source S]` | Keeps a fragment as a new note in the vault's scratchpad, or with `-p` a project's, named by the time of capture (`2026-11-05-2109.md`). The text is stored exactly as given; `-` reads it from standard input. `--source` records where it came from, such as `dictation`. |
-| `research add "Subject" [-p project] [--source S] [--text TEXT\|-] [--agent]` | Adds a research note to the vault's `research/`, or with `-p` a project's, named like other notes. `--source` is a URL or citation. `--text` gives the note's text instead of the template's prompt (`-` reads it from standard input). `--agent` marks a note an agent wrote: it opens with a callout asking you to check it against its source. |
+| `scrap add TEXT\|- [-p project] [--source S]` | Keeps a fragment as a new note in the bookshelf's scratchpad, or with `-p` a project's, named by the time of capture (`2026-11-05-2109.md`). The text is stored exactly as given; `-` reads it from standard input. `--source` records where it came from, such as `dictation`. |
+| `research add "Subject" [-p project] [--source S] [--text TEXT\|-] [--agent]` | Adds a research note to the bookshelf's `research/`, or with `-p` a project's, named like other notes. `--source` is a URL or citation. `--text` gives the note's text instead of the template's prompt (`-` reads it from standard input). `--agent` marks a note an agent wrote: it opens with a callout asking you to check it against its source. |
 | `check [project]` | World-bible gaps across all of a project's books: links to notes that don't exist yet, character, location and world notes whose name never appears in a scene, and scenes missing a status or synopsis. Also entries in `## Books` or `## Contents` that aren't a book or scene there, scenes listed twice, links Obsidian can't follow to a single note, and file names that aren't kebab-case or no longer match the note's name. |
 | `compile [project] [-b book] [--format md\|docx\|epub\|html\|pdf] [-o path]` | The scenes a book's contents list, in order, as one manuscript minus notes-to-self: a heading for each part and chapter, and `***` between scenes. Unplaced scenes are left out. Defaults to `.story-time/build/<project>/<book>.<format>`. |
-| `upgrade [--dry-run]` | Converts a vault from story-time 0.1's layout to the current one, after copying it into `.story-time/backups/<date-time>/`. `--dry-run` lists the changes without making them. See "Upgrading from 0.1" below. |
+| `upgrade [--dry-run]` | Converts a bookshelf from story-time 0.1's layout to the current one, after copying it into `.story-time/backups/<date-time>/`. `--dry-run` lists the changes without making them. See "Upgrading from 0.1" below. |
 
-Without a project argument, commands other than `stats`, `scrap` and `research` use the project folder you are in, or the only project in the vault; `scrap` and `research` use the vault's own folders unless given `-p`. Otherwise give its slug, title, or an unambiguous part of either (`stats sample`). Books work the same way with `-b`: the book folder you are in, else the project's only book.
+Without a project argument, commands other than `stats`, `scrap` and `research` use the project folder you are in, or the only project on the bookshelf; `scrap` and `research` use the bookshelf's own folders unless given `-p`. Otherwise give its slug, title, or an unambiguous part of either (`stats sample`). Books work the same way with `-b`: the book folder you are in, else the project's only book.
 
 ## Conventions
 
-**Projects and books.** A project is a world: a folder at the vault root holding a note with the same name and `type: project`, such as `sample-world/sample-world.md`. Its world bible sits in `bible/` (`characters/`, `locations/`, `world/` and a timeline note) and is shared by every book set in it. Each book is a folder in `books/` with a note of the same name, a story flow (`<book>-flow.md`) and `scenes/`. The project note lists its books in order under `## Books`; story-time adds each new book there. `research`, `scratchpad` and `templates` are never projects. `docs/vault-format.md` describes the full layout.
+**Projects and books.** A project is a world: a folder at the root of the bookshelf holding a note with the same name and `type: project`, such as `sample-world/sample-world.md`. Its world bible sits in `bible/` (`characters/`, `locations/`, `world/` and a timeline note) and is shared by every book set in it. Each book is a folder in `books/` with a note of the same name, a story flow (`<book>-flow.md`) and `scenes/`. The project note lists its books in order under `## Books`; story-time adds each new book there. `research`, `scratchpad` and `templates` are never projects. `docs/bookshelf-format.md` describes the full layout.
 
-**Scratchpads, research and ideas.** A scratchpad is a writer's notebook, one note per fragment (`type: scrap`): the vault's `scratchpad/` for fragments not tied to any world, and a project's `scratchpad/` for those that belong to its world but not yet to a book. Research (`type: research`, with its `source`) is what's true in the real world: a project's in `<project>/research/`, research for several worlds in the vault's `research/`. The ideas file, `scratchpad/ideas.md` by default, is the quick list of one-line ideas; story-time only adds to it.
+**Scratchpads, research and ideas.** A scratchpad is a writer's notebook, one note per fragment (`type: scrap`): the bookshelf's `scratchpad/` for fragments not tied to any world, and a project's `scratchpad/` for those that belong to its world but not yet to a book. Research (`type: research`, with its `source`) is what's true in the real world: a project's in `<project>/research/`, research for several worlds in the bookshelf's `research/`. The ideas file, `scratchpad/ideas.md` by default, is the quick list of one-line ideas; story-time only adds to it.
 
 **Properties** read by story-time (all optional, all editable in Obsidian):
 
@@ -105,11 +105,11 @@ A list item that isn't a link is a chapter, titled by its text (`Chapter` for an
 
 **Word counts** cover the prose a reader would read, in scenes and scratchpads. Scratchpad words count toward the daily goal but toward no book; the world bible and research aren't counted. Counts leave out properties, headings (chapter and scene titles), `%% Obsidian comments %%`, `<!-- HTML comments -->`, callouts such as `> [!todo]`, code blocks and embeds. Links count as the text they display. Hyphenated words count once; words joined by an em dash count separately.
 
-**Templates** in the vault's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{flow_link}}`, `{{timeline_link}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
+**Templates** in the bookshelf's `templates/` folder override the built-in ones, so editing a template in Obsidian changes what `add` and `new` create. Obsidian fills `{{title}}` and `{{date}}`. story-time also fills `{{id}}`, `{{project}}`, `{{book}}`, `{{slug}}`, `{{form}}`, `{{target}}`, `{{premise}}`, `{{flow_link}}`, `{{timeline_link}}`, `{{structure}}` and `{{structure_name}}`. Those placeholders stay literal if you insert the project or story-flow template by hand.
 
-**The vault format.** `docs/vault-format.md` specifies this layout, format 1, and `format = 1` in `.story-time/config.toml` records it. story-time refuses to open a vault whose `format` is newer than it understands, rather than misread or change it. A config file without `format` comes from story-time 0.1: commands stop and ask you to run `story-time upgrade`. A vault with no config file is new, and `init` sets it up.
+**The bookshelf format.** `docs/bookshelf-format.md` specifies this layout, format 1, and `format = 1` in `.story-time/config.toml` records it. story-time refuses to open a bookshelf whose `format` is newer than it understands, rather than misread or change it. A config file without `format` comes from story-time 0.1: commands stop and ask you to run `story-time upgrade`. A folder with no config file is new, and `init` sets it up.
 
-**Upgrading from 0.1.** `story-time upgrade` (or the desktop app, when it opens such a vault) first copies the vault, apart from `.git/` and compiled output, into `.story-time/backups/<date-time>/`, which a git vault's `.gitignore` then leaves out. Then it:
+**Upgrading from 0.1.** `story-time upgrade` (or the desktop app, when it opens such a bookshelf) first copies the bookshelf, apart from `.git/` and compiled output, into `.story-time/backups/<date-time>/`, which `.gitignore` then leaves out of git. Then it:
 
 - moves the ideas file to `scratchpad/ideas.md` exactly as it is, and other notes in `Scratchpad/` to `scratchpad/` as scraps;
 - replaces 0.1's templates with the new ones in `templates/`. A template you changed is kept as `templates/old-<name>.md`, and any of your own move across under a kebab-case name;
@@ -120,10 +120,10 @@ A list item that isn't a link is a chapter, titled by its text (`Chapter` for an
 
 Nothing is changed if a file is in the way of a move; the upgrade says which. To undo an upgrade, put the backup's contents back.
 
-**The writing log** is `.story-time/history.csv`. Each time `stats`, `today`, `history` or `snapshot` runs, it appends a line for every book and scratchpad whose count changed, recorded under the book's `id` so renaming the book or its project keeps its history. A project's scratchpad is recorded under the project's `id`, and the vault's as `scratchpad`. (A book without an `id` is recorded as `<project>/<book>`, a project's scratchpad as `<project>/scratchpad`.) Moving a scene into a scratchpad doesn't count as writing or as words lost. Words written on a day are the net change from the previous snapshot, so deleting words counts against the day. If you write without running a command, those words count toward the next day you do. To log every day, schedule a snapshot:
+**The writing log** is `.story-time/history.csv`. Each time `stats`, `today`, `history` or `snapshot` runs, it appends a line for every book and scratchpad whose count changed, recorded under the book's `id` so renaming the book or its project keeps its history. A project's scratchpad is recorded under the project's `id`, and the bookshelf's as `scratchpad`. (A book without an `id` is recorded as `<project>/<book>`, a project's scratchpad as `<project>/scratchpad`.) Moving a scene into a scratchpad doesn't count as writing or as words lost. Words written on a day are the net change from the previous snapshot, so deleting words counts against the day. If you write without running a command, those words count toward the next day you do. To log every day, schedule a snapshot:
 
 ```cron
-55 23 * * * $HOME/.cargo/bin/story-time --vault $HOME/stories snapshot
+55 23 * * * $HOME/.cargo/bin/story-time --bookshelf $HOME/stories snapshot
 ```
 
 ## The desktop app
@@ -166,7 +166,7 @@ Spellcheck uses the system dictionaries (hunspell on Linux). Set the language pe
 
 ```
 crates/
-├── core/            story-time-core: the library. Vault discovery, projects, notes and
+├── core/            story-time-core: the library. Finding the bookshelf, projects, notes and
 │                    properties, word counting, templates, structures, scaffolding, ideas,
 │                    history, checks, compile.
 └── cli/             story-time: the command-line front end. Argument parsing and printing.
@@ -204,7 +204,7 @@ Development builds (`npm run tauri dev`) read three optional variables, handled 
 Point the app at a throwaway folder by giving it its own config and data directories, so your real stories and settings are untouched:
 
 ```sh
-mkdir -p /tmp/st/config/story-time && echo 'vault = "/tmp/st/vault"' > /tmp/st/config/story-time/config.toml
+mkdir -p /tmp/st/config/story-time && echo 'bookshelf = "/tmp/st/shelf"' > /tmp/st/config/story-time/config.toml
 XDG_CONFIG_HOME=/tmp/st/config XDG_DATA_HOME=/tmp/st/data VITE_SNAPSHOT_DIR=/tmp/st/shots npm run tauri dev
 ```
 
@@ -218,7 +218,7 @@ Pushing a version tag builds the installers on GitHub (`.github/workflows/releas
 2. Commit, then tag and push: `git tag -a v0.2.0 -m "v0.2.0" && git push origin main v0.2.0`.
 3. When the run finishes, check the draft release on GitHub and publish it.
 
-Versions follow [semantic versioning](https://semver.org). Before 1.0, raise the minor version (0.2.0) for new features or any change to the vault format, configuration or CLI, and the patch version (0.1.1) for fixes. To build an existing tag again, run the Release workflow from the Actions tab and give it the tag.
+Versions follow [semantic versioning](https://semver.org). Before 1.0, raise the minor version (0.2.0) for new features or any change to the bookshelf format, configuration or CLI, and the patch version (0.1.1) for fixes. To build an existing tag again, run the Release workflow from the Actions tab and give it the tag.
 
 ## Licence
 

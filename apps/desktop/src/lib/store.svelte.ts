@@ -126,7 +126,7 @@ async function enterVault() {
 }
 
 export async function chooseVault() {
-  const picked = await open({ directory: true, multiple: false, title: "Choose your stories folder" });
+  const picked = await open({ directory: true, multiple: false, title: "Choose your bookshelf" });
   if (typeof picked !== "string") return;
   if (!(await settle())) return;
   try {
@@ -144,7 +144,7 @@ export async function upgradeVault() {
     const backup = await api.upgradeVault();
     app.vault = await api.vaultStatus();
     await enterVault();
-    toast(`Upgraded. The folder as it was is kept in ${backup}.`);
+    toast(`Upgraded. The bookshelf as it was is kept in ${backup}.`);
   } catch (error) {
     toastError(error);
   }

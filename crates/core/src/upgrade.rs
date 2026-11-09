@@ -1,5 +1,5 @@
 //! Upgrading a vault from the layout story-time 0.1 used (format 0) to format 1, as
-//! docs/vault-format.md ("Versions and upgrades") describes.
+//! docs/bookshelf-format.md ("Versions and upgrades") describes.
 //!
 //! [`plan`] works out every change without touching anything, so a clash stops the upgrade before
 //! it starts. [`apply`] copies the vault into `.story-time/backups/`, then makes the changes. Notes
@@ -113,7 +113,7 @@ struct Edit {
 pub fn plan(vault: &Vault) -> Result<Plan> {
     if !vault.config.needs_upgrade() {
         bail!(
-            "this vault is already in format {}, so there is nothing to upgrade",
+            "this bookshelf is already in format {}, so there is nothing to upgrade",
             vault.config.format
         );
     }

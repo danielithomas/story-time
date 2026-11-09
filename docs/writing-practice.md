@@ -1,12 +1,12 @@
 # How writers organise their work, and where story-time fits
 
-Tools like Scrivener, and the habits of working novelists and screenwriters, keep returning to a handful of ideas. This note summarises them, maps each one onto the vault and story-time, and lists what could come next. The craft is the writer's; the tooling only removes friction.
+Tools like Scrivener, and the habits of working novelists and screenwriters, keep returning to a handful of ideas. This note summarises them, maps each one onto the bookshelf and story-time, and lists what could come next. The craft is the writer's; the tooling only removes friction.
 
 ## 1. Keep the book apart from everything about the book
 
 Scrivener's binder separates the *Draft* (the manuscript) from *Research* and notes. Television writers keep the scripts apart from the *series bible*. The point is that the manuscript can be measured, read and exported on its own, while notes can grow freely without polluting it.
 
-**In the vault:** a book's `scenes/`, in the order its contents list gives them, are the book; `bible/` (characters, locations, world notes and the timeline) is the world bible, shared by every book set in the world; the flow note is the plan. Research and scratchpads sit beside them and are never compiled. Inside a scene, notes-to-self go in `%% comments %%` or callouts (`> [!todo] check the physics`). Obsidian hides comments in Reading view, and story-time leaves both out of word counts and compiled manuscripts. You can leave a note mid-sentence without breaking the flow of drafting.
+**On the bookshelf:** a book's `scenes/`, in the order its contents list gives them, are the book; `bible/` (characters, locations, world notes and the timeline) is the world bible, shared by every book set in the world; the flow note is the plan. Research and scratchpads sit beside them and are never compiled. Inside a scene, notes-to-self go in `%% comments %%` or callouts (`> [!todo] check the physics`). Obsidian hides comments in Reading view, and story-time leaves both out of word counts and compiled manuscripts. You can leave a note mid-sentence without breaking the flow of drafting.
 
 ## 2. The world bible
 
@@ -64,10 +64,10 @@ Science fiction and fantasy novels from new authors typically run 90,000–120,0
 
 ## 7. Backups and versions
 
-The 3-2-1 rule: three copies, on two kinds of media, one off-site. A vault in git with a remote such as GitHub meets it: the working copy, the local history and the remote. Git commits also give you what Scrivener calls *snapshots*: every earlier version of every scene.
+The 3-2-1 rule: three copies, on two kinds of media, one off-site. A bookshelf in git with a remote such as GitHub meets it: the working copy, the local history and the remote. Git commits also give you what Scrivener calls *snapshots*: every earlier version of every scene.
 
 - The obsidian-git plugin commits and syncs on a timer (`autoSaveInterval`, in minutes), and only while Obsidian is open. Work done between syncs, or with Obsidian closed, exists only locally until the next sync. A shorter interval narrows that window.
-- **OneDrive** works fine for a plain folder, and story-time doesn't care where the vault lives. Don't put a *git repository* inside a synced folder, though: two sync engines working on `.git/` can corrupt it. Choose git with GitHub, or OneDrive, for a given folder. On Linux there is no official OneDrive client; the usual choices are the open-source `onedrive` client (abraunegg) or `rclone`.
+- **OneDrive** works fine for a plain folder, and story-time doesn't care where the bookshelf lives. Don't put a *git repository* inside a synced folder, though: two sync engines working on `.git/` can corrupt it. Choose git with GitHub, or OneDrive, for a given folder. On Linux there is no official OneDrive client; the usual choices are the open-source `onedrive` client (abraunegg) or `rclone`.
 
 ## What could come next
 

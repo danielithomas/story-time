@@ -1,8 +1,8 @@
-# The vault format
+# The bookshelf format
 
-**Status: approved 2026-11-05, implemented in story-time 0.2.** `story-time upgrade` converts a vault from the unversioned layout of story-time 0.1.
+**Status: approved 2026-11-05, implemented in story-time 0.2.** `story-time upgrade` converts a bookshelf from the unversioned layout of story-time 0.1.
 
-This document is the contract between story-time and a writer's vault: what goes where, what each note holds, and which parts story-time reads and writes. It is format **1**. Before story-time 1.0, any change to this document raises the minor version; after 1.0, the major version.
+A **bookshelf** is the folder a writer's stories live in. Obsidian can open the same folder as a vault. This document is the contract between story-time and a bookshelf: what goes where, what each note holds, and which parts story-time reads and writes. It is format **1**. Before story-time 1.0, any change to this document raises the minor version; after 1.0, the major version.
 
 The decisions behind it are recorded in [GitHub issues](https://github.com/danielithomas/story-time/issues?q=label%3Avault-format) #1 to #5, with #6, #7 and #24 for the format version, IDs and scratchpads. Other `#` numbers below refer to issues too.
 
@@ -16,16 +16,16 @@ The decisions behind it are recorded in [GitHub issues](https://github.com/danie
 ## Layout
 
 ```
-vault/                              one vault per git repository
+bookshelf/                          one bookshelf per git repository
 ├── .story-time/
-│   ├── config.toml                 settings for this vault
+│   ├── config.toml                 settings for this bookshelf
 │   ├── history.csv                 the writing log
 │   └── build/                      compiled manuscripts (not committed)
 ├── .gitattributes
 ├── .gitignore
 ├── templates/                      note templates, shared with Obsidian
 ├── research/                       research not tied to one world
-├── scratchpad/                     the vault's scratchpad
+├── scratchpad/                     the bookshelf's scratchpad
 │   ├── ideas.md                    the ideas file
 │   └── 2026-11-05-2109.md          a captured note
 └── sample-story-world/             a project: one world
@@ -45,10 +45,10 @@ vault/                              one vault per git repository
 ```
 
 - **A project is a world**: one or more books that share a world bible (#3). Books in different worlds are different projects.
-- **A project is a folder at the vault root holding a note with the same name** and `type: project`. `research/`, `scratchpad/`, `templates/` and folders starting with a dot are never projects. Other files and folders, such as a readme, are left alone.
+- **A project is a folder at the root of the bookshelf holding a note with the same name** and `type: project`. `research/`, `scratchpad/`, `templates/` and folders starting with a dot are never projects. Other files and folders, such as a readme, are left alone.
 - **Every project keeps `books/`**, even with a single book, so a sequel is just a second folder and nothing moves. The app hides the `books/` level when a project has only one book.
 - **Each project folder is self-contained.** Links between its notes use only paths inside the project, so a project can later move into a repository of its own with its history (`git filter-repo --subdirectory-filter <project>`).
-- All projects start in one vault. Ideas, the daily goal and the writing streak span projects.
+- All projects start on one bookshelf. Ideas, the daily goal and the writing streak span projects.
 
 ## Names
 
@@ -66,13 +66,13 @@ vault/                              one vault per git repository
 ## Links
 
 - Links are wikilinks with the note's name as their text: `[[mara-okafor|Mara Okafor]]`.
-- **Resolving a link.** story-time looks for the file name in the same book first, then the rest of the project, then the vault outside any project. In story-time, `[[mara-okafor]]` always means this world's Mara.
-- **For Obsidian**, which looks names up across the whole vault, a link to a name that also exists elsewhere in the vault is written as a path relative to the note: `[[../../../bible/characters/mara-okafor|Mara Okafor]]`. This is the form Obsidian writes with its "Relative path to file" setting, and it keeps working if the project moves to a repository of its own.
+- **Resolving a link.** story-time looks for the file name in the same book first, then the rest of the project, then the bookshelf outside any project. In story-time, `[[mara-okafor]]` always means this world's Mara.
+- **For Obsidian**, which looks names up across the whole folder, a link to a name that also exists elsewhere on the bookshelf is written as a path relative to the note: `[[../../../bible/characters/mara-okafor|Mara Okafor]]`. This is the form Obsidian writes with its "Relative path to file" setting, and it keeps working if the project moves to a repository of its own.
 - Adding a note whose name exists elsewhere makes existing bare links to the other note ambiguous in Obsidian. story-time warns when that happens, and `check` lists them.
 
 ## Notes and properties
 
-Every note story-time manages has a `type`. Properties are flat, and each name has one type across the vault, as Obsidian requires: `target` is a number and `created` a date in every note.
+Every note story-time manages has a `type`. Properties are flat, and each name has one type across the bookshelf, as Obsidian requires: `target` is a number and `created` a date in every note.
 
 | Note | Where | Properties |
 |---|---|---|
@@ -156,13 +156,13 @@ Order is written as a Markdown list of links, readable and clickable in any edit
 
 **The timeline** is the world's chronology: the order things happened in, where a book's flow note is the order its story is told in. Scenes appear on it through their `when`. The timeline note holds what no scene shows, such as backstory, history, births and deaths, as a plain Markdown list (`- Year 3, day 12: the landing`) that reads as a chronology without story-time. Its exact format, and any invented calendar, are left to the timeline work (#21).
 
-**Research** holds what is true in the real world: physics, history, references, gathered from outside sources and used to build or enrich the story. The story may draw on it or knowingly break it. A project's research lives in `<project>/research/`; research useful to several worlds lives in the vault's `research/`. One note per subject, with its `source` (a URL or citation). Agents may add research notes (#23); story-time opens each with a callout saying an agent added it, so the writer knows to check it against its source. Research may also hold files that aren't Markdown, such as PDFs and images, which story-time leaves alone. Large files make a git repository slow to clone, so link to them where you can.
+**Research** holds what is true in the real world: physics, history, references, gathered from outside sources and used to build or enrich the story. The story may draw on it or knowingly break it. A project's research lives in `<project>/research/`; research useful to several worlds lives in the bookshelf's `research/`. One note per subject, with its `source` (a URL or citation). Agents may add research notes (#23); story-time opens each with a callout saying an agent added it, so the writer knows to check it against its source. Research may also hold files that aren't Markdown, such as PDFs and images, which story-time leaves alone. Large files make a git repository slow to clone, so link to them where you can.
 
 ## Scratchpads and the ideas file
 
 A scratchpad is a writer's notebook: fragments kept until they're useful, which may be years later (#24).
 
-- **The vault's scratchpad**, `scratchpad/`, holds fragments not tied to any world. **A project's scratchpad**, `<project>/scratchpad/`, holds fragments that belong to the world but not yet to a book.
+- **The bookshelf's scratchpad**, `scratchpad/`, holds fragments not tied to any world. **A project's scratchpad**, `<project>/scratchpad/`, holds fragments that belong to the world but not yet to a book.
 - **One note per fragment**, with `type: scrap`.
 - **Cutting a scene** moves it to its project's scratchpad. It keeps its properties, so it can go back into a book unchanged.
 - **Using a scrap**: move it into a book as an unplaced scene, or keep it and add a link to the scene it led to in `used`.
@@ -176,11 +176,11 @@ A scratchpad is a writer's notebook: fragments kept until they're useful, which 
 - **A book's count** covers all its scenes, placed or unplaced. Compiled manuscripts, and their page and reading-time estimates, include only placed scenes.
 - **A scratchpad's count** goes toward the daily goal but toward no book's target.
 - **The world bible and research** aren't counted: they're about the story, not the story.
-- **Words written in a day** are the net change across the whole vault, so moving a scene between a book and a scratchpad doesn't count as writing.
+- **Words written in a day** are the net change across the whole bookshelf, so moving a scene between a book and a scratchpad doesn't count as writing.
 
 ## story-time's own files
 
-**`.story-time/config.toml`** holds the vault's settings:
+**`.story-time/config.toml`** holds the bookshelf's settings:
 
 ```toml
 format = 1                            # this document's version
@@ -188,7 +188,7 @@ daily_goal = 500                      # words a day
 words_per_page = 250                  # manuscript estimates
 reading_wpm = 250
 ideas_file = "scratchpad/ideas.md"
-scratchpad = "scratchpad"             # the vault's scratchpad folder
+scratchpad = "scratchpad"             # the bookshelf's scratchpad folder
 templates_dir = "templates"
 # author = "Your Name"                # printed on compiled manuscripts
 # spelling = ["en_AU"]                # the editor's spellcheck languages
@@ -198,7 +198,7 @@ Settings added by later features, such as git (#22), are documented with them.
 
 **`.story-time/history.csv`** is the writing log. It is append-only and never rewritten. Each row is `timestamp,id,words`: a local time (`2026-11-05T21:09:00`), what was measured, and its word count at that moment.
 
-- What was measured is a book's `id`, a project's `id` for the project's scratchpad, or `scratchpad` for the vault's.
+- What was measured is a book's `id`, a project's `id` for the project's scratchpad, or `scratchpad` for the bookshelf's.
 - A row is added whenever a count has changed since the last row for it.
 - Logs started before format 1 have the header `timestamp,project,words` and project folder names in the second column. Those rows stay readable.
 
@@ -211,8 +211,8 @@ Settings added by later features, such as git (#22), are documented with them.
 ## Versions and upgrades
 
 - `story-time init` writes `format = 1` (#6).
-- **A vault without a `format` key** uses the unversioned layout from before this document. story-time offers to upgrade it after making a backup. The upgrade renames files and folders to kebab-case, with each note's name kept in `aliases`, and moves the vault-level folders and files to `scratchpad/`, `scratchpad/ideas.md` and `templates/`. It moves each project's characters, locations and world notes into `bible/`, and turns the project into a single-book project whose chapters become scenes, listed in the book's contents in their old order.
-- **A vault with a newer format** than story-time knows is refused with a clear message, never edited.
+- **A bookshelf without a `format` key** uses the unversioned layout from before this document. story-time offers to upgrade it after making a backup. The upgrade renames files and folders to kebab-case, with each note's name kept in `aliases`, and moves the folders and files at its root to `scratchpad/`, `scratchpad/ideas.md` and `templates/`. It moves each project's characters, locations and world notes into `bible/`, and turns the project into a single-book project whose chapters become scenes, listed in the book's contents in their old order.
+- **A bookshelf with a newer format** than story-time knows is refused with a clear message, never edited.
 
 ## What `check` reports
 

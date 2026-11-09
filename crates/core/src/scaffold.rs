@@ -537,7 +537,7 @@ pub fn add_research(
         .iter()
         .any(|note| note.title().eq_ignore_ascii_case(&name))
     {
-        let owner = project.map_or_else(|| "The vault".to_string(), Project::title);
+        let owner = project.map_or_else(|| "The bookshelf".to_string(), Project::title);
         bail!("{owner} already has research called {name}");
     }
     let taken = match project {

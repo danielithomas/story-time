@@ -6,8 +6,8 @@
 //! with a book note listing its contents, a story flow and `scenes/`. Scratchpads and research sit
 //! beside them, in the vault and in each project. Everything this crate knows comes from those
 //! files and their YAML frontmatter, and everything it writes is ordinary Markdown, so the vault
-//! stays readable and editable without it. `docs/vault-format.md` specifies the layout. Front ends
-//! (the CLI and the desktop app) sit on top of this crate.
+//! stays readable and editable without it. `docs/bookshelf-format.md` specifies the layout.
+//! Front ends (the CLI and the desktop app) sit on top of this crate.
 
 pub mod check;
 pub mod compile;

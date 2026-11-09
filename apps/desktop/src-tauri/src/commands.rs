@@ -64,7 +64,7 @@ impl AppState {
     /// The open vault, in whatever format it is in.
     fn any_vault(&self) -> CmdResult<Vault> {
         let root = self.root.lock().expect("state lock").clone();
-        let root = root.ok_or_else(|| "No stories folder is open.".to_string())?;
+        let root = root.ok_or_else(|| "No bookshelf is open.".to_string())?;
         Vault::open(root).or_message()
     }
 
@@ -389,7 +389,7 @@ fn note_path(vault: &Vault, path: &str) -> CmdResult<PathBuf> {
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
     if !canonical.starts_with(&vault.root) || !is_markdown {
-        return Err(format!("{path} is not a note in the stories folder"));
+        return Err(format!("{path} is not a note on this bookshelf"));
     }
     Ok(canonical)
 }

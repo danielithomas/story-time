@@ -21,6 +21,7 @@ fn run(vault: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_story-time"))
         .args(args)
         .current_dir(vault)
+        .env_remove("STORY_TIME_BOOKSHELF")
         .env_remove("STORY_TIME_VAULT")
         .output()
         .unwrap()
@@ -231,6 +232,7 @@ fn scratchpads_and_research() {
     let piped = Command::new(env!("CARGO_BIN_EXE_story-time"))
         .args(["scrap", "add", "-", "-p", "sample"])
         .current_dir(root)
+        .env_remove("STORY_TIME_BOOKSHELF")
         .env_remove("STORY_TIME_VAULT")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -324,6 +326,38 @@ fn helpful_errors() {
 }
 
 #[test]
+fn finds_the_bookshelf_by_its_old_names_too() {
+    let dir = vault();
+    let shelf = dir.path().to_str().unwrap();
+    // Run from elsewhere, with no user config to fall back on.
+    let elsewhere = TempDir::new().unwrap();
+    for (args, var) in [
+        (vec!["--bookshelf", shelf], None),
+        (vec!["--vault", shelf], None),
+        (vec![], Some("STORY_TIME_BOOKSHELF")),
+        (vec![], Some("STORY_TIME_VAULT")),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_story-time"));
+        command
+            .args(&args)
+            .arg("today")
+            .current_dir(elsewhere.path())
+            .env("XDG_CONFIG_HOME", elsewhere.path())
+            .env_remove("STORY_TIME_BOOKSHELF")
+            .env_remove("STORY_TIME_VAULT");
+        if let Some(var) = var {
+            command.env(var, shelf);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?} {var:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn refuses_a_vault_in_a_newer_format() {
     let dir = vault();
     let root = dir.path();
@@ -392,7 +426,10 @@ fn upgrades_a_vault_from_story_time_0_1() {
     );
     assert!(root.join("templates/scene.md").is_file());
     let config = fs::read_to_string(root.join(".story-time/config.toml")).unwrap();
-    assert!(config.starts_with("# The layout of this vault"), "{config}");
+    assert!(
+        config.starts_with("# The layout of this bookshelf"),
+        "{config}"
+    );
     assert!(config.contains("format = 1"), "{config}");
     ok(root, &["idea", "Third Story: one more"]);
     let today = ok(root, &["today"]);

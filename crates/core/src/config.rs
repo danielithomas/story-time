@@ -10,22 +10,32 @@ use serde::Deserialize;
 pub const META_DIR: &str = ".story-time";
 pub const CONFIG_FILE: &str = "config.toml";
 
-/// The newest vault format this build understands (docs/vault-format.md). A vault without a
+/// The newest vault format this build understands (docs/bookshelf-format.md). A vault without a
 /// `format` setting uses the unversioned layout of story-time 0.1, format 0, which
 /// `story-time upgrade` converts.
 pub const FORMAT: u32 = 1;
 
 /// Introduces the `format` setting in the config file.
-const FORMAT_COMMENT: &str =
-    "# The layout of this vault, so story-time reads it right. `story-time upgrade` changes it.";
+const FORMAT_COMMENT: &str = "# The layout of this bookshelf, so story-time reads it right. `story-time upgrade` changes it.";
 /// Introduces the `scratchpad` setting in the config file.
 const SCRATCHPAD_COMMENT: &str =
-    "# The vault's scratchpad: fragments not tied to any world (`story-time scrap add`).";
+    "# The bookshelf's scratchpad: fragments not tied to any world (`story-time scrap add`).";
+/// Comments in story-time 0.1's config file that have been reworded since.
+const REWORDED: [(&str, &str); 2] = [
+    (
+        "# story-time settings for this vault.",
+        "# story-time settings for this bookshelf.",
+    ),
+    (
+        "# Where `story-time idea` captures ideas, relative to the vault.",
+        "# Where `story-time idea` captures ideas, relative to the bookshelf.",
+    ),
+];
 
 /// The config file written by `story-time init`; it documents every setting.
-pub const DEFAULT_CONFIG: &str = r#"# story-time settings for this vault.
+pub const DEFAULT_CONFIG: &str = r#"# story-time settings for this bookshelf.
 
-# The layout of this vault, so story-time reads it right. `story-time upgrade` changes it.
+# The layout of this bookshelf, so story-time reads it right. `story-time upgrade` changes it.
 format = 1
 
 # Words you aim to write each day (used by `story-time today` and `story-time history`).
@@ -36,10 +46,10 @@ daily_goal = 500
 words_per_page = 250
 reading_wpm = 250
 
-# Where `story-time idea` captures ideas, relative to the vault.
+# Where `story-time idea` captures ideas, relative to the bookshelf.
 ideas_file = "scratchpad/ideas.md"
 
-# The vault's scratchpad: fragments not tied to any world (`story-time scrap add`).
+# The bookshelf's scratchpad: fragments not tied to any world (`story-time scrap add`).
 scratchpad = "scratchpad"
 
 # Note templates, shared with Obsidian's core Templates plugin.
@@ -104,7 +114,7 @@ impl Config {
     pub fn ensure_supported(&self) -> Result<()> {
         if self.format > FORMAT {
             bail!(
-                "this vault uses format {}, which is newer than this version of story-time \
+                "this bookshelf uses format {}, which is newer than this version of story-time \
                  understands (up to format {FORMAT}). Update story-time to open it.",
                 self.format
             );
@@ -121,8 +131,8 @@ impl Config {
     pub fn ensure_current(&self) -> Result<()> {
         if self.needs_upgrade() {
             bail!(
-                "this vault is laid out the way story-time 0.1 did it. Run `story-time upgrade` \
-                 to convert it; it backs the vault up first."
+                "this bookshelf is laid out the way story-time 0.1 did it. Run `story-time upgrade` \
+                 to convert it; it backs the bookshelf up first."
             );
         }
         Ok(())
@@ -131,9 +141,14 @@ impl Config {
 
 /// A format-0 config file upgraded to format 1: `format` added before the first setting, the ideas
 /// file and templates pointed at their new folders, and the scratchpad set after the ideas file.
-/// Comments and other settings stay as written.
+/// Other settings and the writer's comments stay as written.
 pub fn upgraded_config(text: &str) -> String {
     let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    for line in &mut lines {
+        if let Some((_, new)) = REWORDED.iter().find(|(old, _)| line == old) {
+            *line = new.to_string();
+        }
+    }
     let find =
         |lines: &[String], key: &str| lines.iter().position(|line| setting(line) == Some(key));
     for (key, value) in [
@@ -181,10 +196,12 @@ fn setting(line: &str) -> Option<&str> {
     line.split_once('=').map(|(key, _)| key.trim())
 }
 
-/// Per-machine settings, so commands find the vault from any directory (for example a vault kept on OneDrive).
+/// Per-machine settings, so commands find the bookshelf from any directory (for example one kept on
+/// OneDrive). Before 0.3 the key was `vault`, which still works.
 #[derive(Debug, Default, Deserialize)]
 struct UserConfig {
-    vault: Option<String>,
+    #[serde(alias = "vault")]
+    bookshelf: Option<String>,
 }
 
 /// `~/.config/story-time/config.toml` on Linux; the platform equivalent elsewhere.
@@ -192,7 +209,7 @@ pub fn user_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|dir| dir.join("story-time").join(CONFIG_FILE))
 }
 
-/// The `vault` set in the user config file, if there is one.
+/// The `bookshelf` set in the user config file, if there is one.
 pub fn user_default_vault() -> Result<Option<PathBuf>> {
     let Some(path) = user_config_path().filter(|path| path.is_file()) else {
         return Ok(None);
@@ -200,25 +217,24 @@ pub fn user_default_vault() -> Result<Option<PathBuf>> {
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let config: UserConfig =
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    Ok(config.vault.map(|vault| expand_home(&vault)))
+    Ok(config.bookshelf.map(|path| expand_home(&path)))
 }
 
-/// Remembers `vault` as this machine's default, keeping anything else in the user config file.
+/// Remembers `vault` as this machine's default bookshelf, keeping anything else in the user
+/// config file.
 pub fn set_user_default_vault(vault: &Path) -> Result<()> {
     let path = user_config_path().context("this system has no config folder")?;
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let setting = format!(
-        "vault = {}",
+    let default = format!(
+        "bookshelf = {}",
         toml::Value::String(vault.display().to_string())
     );
     let mut lines: Vec<String> = existing
         .lines()
-        .filter(|line| {
-            !line.trim_start().starts_with("vault ") && !line.trim_start().starts_with("vault=")
-        })
+        .filter(|line| !matches!(setting(line.trim_start()), Some("bookshelf" | "vault")))
         .map(String::from)
         .collect();
-    lines.insert(0, setting);
+    lines.insert(0, default);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -235,6 +251,14 @@ fn expand_home(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_default_bookshelf_by_its_old_name_too() {
+        for text in ["bookshelf = \"/stories\"", "vault = \"/stories\""] {
+            let config: UserConfig = toml::from_str(text).unwrap();
+            assert_eq!(config.bookshelf.as_deref(), Some("/stories"), "{text}");
+        }
+    }
 
     #[test]
     fn default_file_matches_defaults() {

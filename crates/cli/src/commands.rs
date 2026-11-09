@@ -24,7 +24,7 @@ pub fn init(root: &Path, force: bool) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("{} not found", root.display()))?;
     let steps = scaffold::init_vault(&root, force)?;
-    println!("Vault: {}", root.display());
+    println!("Bookshelf: {}", root.display());
     for step in &steps {
         let (verb, path) = match step {
             Step::Created(path) => ("created", path),
@@ -75,7 +75,10 @@ pub fn upgrade(vault: &Vault, dry_run: bool, now: NaiveDateTime) -> Result<()> {
         return Ok(());
     }
     let backup = upgrade::apply(vault, &plan, now)?;
-    println!("\nUpgraded. The vault as it was is in {}.", shown(&backup));
+    println!(
+        "\nUpgraded. The bookshelf as it was is in {}.",
+        shown(&backup)
+    );
     if plan.moves.iter().any(|(_, to)| {
         to.file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with("old-"))

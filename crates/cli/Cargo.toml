@@ -1,6 +1,6 @@
 [package]
 name = "story-time"
-description = "Organise, measure and compile the stories in a Markdown (Obsidian) vault."
+description = "Organise, measure and compile the stories on a bookshelf of Markdown files."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

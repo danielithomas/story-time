@@ -14,11 +14,11 @@
   <div class="column">
     {#if app.vault?.needsUpgrade}
       <h1>Upgrade {app.vault.name}</h1>
-      <p class="lead">This folder is laid out the way story-time 0.1 did it.</p>
+      <p class="lead">This bookshelf is laid out the way story-time 0.1 did it.</p>
       <p class="muted">
         Story Time can rearrange it for this version: lower-case file names, and in each project, its
         characters, places and world notes in a world bible and its chapters as the scenes of a book. Your
-        writing stays as it is. The whole folder is copied into <code>.story-time/backups</code> first.
+        writing stays as it is. The whole bookshelf is copied into <code>.story-time/backups</code> first.
       </p>
       <div class="actions">
         <button class="btn primary" disabled={upgrading} onclick={upgrade}>
@@ -30,10 +30,10 @@
       <h1>Story Time</h1>
       <p class="lead">A quiet place to write.</p>
       <p class="muted">
-        Your stories are kept as plain Markdown files in a folder you choose: on OneDrive, in a git repository,
+        Your stories are kept on a bookshelf: a folder of plain Markdown files, on OneDrive, in a git repository,
         anywhere. Nothing is locked in; Obsidian and other editors can open the same folder.
       </p>
-      <button class="btn primary" onclick={chooseVault}>Choose your stories folder</button>
+      <button class="btn primary" onclick={chooseVault}>Choose your bookshelf</button>
     {/if}
   </div>
 </div>

@@ -1,6 +1,6 @@
 [package]
 name = "story-time-core"
-description = "Reads and writes a plain-Markdown story vault: projects, word counts, writing history, checks and compiling."
+description = "Reads and writes a bookshelf of plain-Markdown stories: projects, word counts, writing history, checks and compiling."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

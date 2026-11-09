@@ -25,7 +25,7 @@ impl Vault {
         let root = root.as_ref();
         let root = root
             .canonicalize()
-            .with_context(|| format!("vault folder {} not found", root.display()))?;
+            .with_context(|| format!("folder {} not found", root.display()))?;
         if !root.is_dir() {
             bail!("{} is not a folder", root.display());
         }
@@ -53,8 +53,8 @@ impl Vault {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         bail!(
-            "no vault found. Run this inside your stories folder, pass --vault, set STORY_TIME_VAULT, \
-             or put `vault = \"/path/to/stories\"` in {user_config}"
+            "no bookshelf found. Run this inside your bookshelf folder, pass --bookshelf, set \
+             STORY_TIME_BOOKSHELF, or put `bookshelf = \"/path/to/stories\"` in {user_config}"
         )
     }
 

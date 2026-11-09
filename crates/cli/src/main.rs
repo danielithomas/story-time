@@ -1,4 +1,4 @@
-//! `story-time`: organise, measure and compile the stories in a Markdown (Obsidian) vault.
+//! `story-time`: organise, measure and compile the stories on a bookshelf of Markdown files.
 
 mod commands;
 mod output;
@@ -23,13 +23,19 @@ use crate::output::thousands;
 #[command(
     name = "story-time",
     version,
-    about = "Organise, measure and compile the stories in a Markdown (Obsidian) vault."
+    about = "Organise, measure and compile the stories on a bookshelf: a folder of Markdown files, which Obsidian can open too."
 )]
 struct Cli {
-    /// The vault folder. Defaults to the nearest folder holding .story-time or .obsidian, then
-    /// to `vault` in ~/.config/story-time/config.toml.
-    #[arg(long, global = true, env = "STORY_TIME_VAULT")]
-    vault: Option<PathBuf>,
+    /// The bookshelf folder. Defaults to the nearest folder holding .story-time or .obsidian,
+    /// then to `bookshelf` in ~/.config/story-time/config.toml.
+    #[arg(
+        long,
+        alias = "vault",
+        value_name = "PATH",
+        global = true,
+        env = "STORY_TIME_BOOKSHELF"
+    )]
+    bookshelf: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -37,7 +43,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Set up a vault: config, note templates, and the folder for Obsidian's Templates plugin.
+    /// Set up a bookshelf: config, note templates, and the folder for Obsidian's Templates plugin.
     Init {
         /// Replace existing templates with the built-in versions.
         #[arg(long)]
@@ -115,7 +121,7 @@ enum Command {
         #[arg(long)]
         non_fiction: bool,
     },
-    /// Keep a fragment in a scratchpad: the vault's, or with --project, a world's. Scratchpad
+    /// Keep a fragment in a scratchpad: the bookshelf's, or with --project, a world's. Scratchpad
     /// words count towards the daily goal but towards no book.
     Scrap {
         #[command(subcommand)]
@@ -129,7 +135,7 @@ enum Command {
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
     Check { project: Option<String> },
-    /// Convert a vault from story-time 0.1's layout to the current one, after copying it into
+    /// Convert a bookshelf from story-time 0.1's layout to the current one, after copying it into
     /// .story-time/backups/.
     Upgrade {
         /// List the changes without making them.
@@ -144,7 +150,7 @@ enum Command {
         book: Option<String>,
         #[arg(long, default_value = "md", value_parser = format_values())]
         format: String,
-        /// Where to write it (default: .story-time/build/<project>/<book>.<format> in the vault).
+        /// Where to write it (default: .story-time/build/<project>/<book>.<format> on the bookshelf).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -157,7 +163,7 @@ enum ScrapAction {
         /// The text, or - to read it from standard input.
         #[arg(required = true, num_args = 1..)]
         text: Vec<String>,
-        /// Put it in this project's scratchpad (slug or title) instead of the vault's.
+        /// Put it in this project's scratchpad (slug or title) instead of the bookshelf's.
         #[arg(short, long)]
         project: Option<String>,
         /// Where it came from, such as `dictation`.
@@ -172,7 +178,7 @@ enum ResearchAction {
     Add {
         /// What it is about: the note's name.
         name: String,
-        /// Put it in this project's research (slug or title) instead of the vault's.
+        /// Put it in this project's research (slug or title) instead of the bookshelf's.
         #[arg(short, long)]
         project: Option<String>,
         /// Where it came from: a URL or citation.
@@ -230,10 +236,14 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<()> {
     let cwd = env::current_dir()?;
+    // Before 0.3 the bookshelf was called a vault, and the old variable still works.
+    let bookshelf = cli
+        .bookshelf
+        .or_else(|| env::var_os("STORY_TIME_VAULT").map(PathBuf::from));
     if let Command::Init { force } = cli.command {
-        return commands::init(&cli.vault.unwrap_or(cwd), force);
+        return commands::init(&bookshelf.unwrap_or(cwd), force);
     }
-    let vault = Vault::discover(cli.vault.as_deref(), &cwd)?;
+    let vault = Vault::discover(bookshelf.as_deref(), &cwd)?;
     let now = Local::now().naive_local();
     if let Command::Upgrade { dry_run } = cli.command {
         return commands::upgrade(&vault, dry_run, now);
