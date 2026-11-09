@@ -25,7 +25,7 @@ use story_time_core::text::thousands;
 use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Project, Scene, Vault, check, config, words};
-use tauri::{State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -511,8 +511,59 @@ pub async fn vault_status(
     Ok(Some(vault_info(&vault)))
 }
 
-/// Opens a stories folder, setting it up if it is new, and remembers it for next time. A folder
-/// in story-time 0.1's layout is left as it is until the writer chooses to upgrade it.
+/// A folder the writer picked, before it opens.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderInfo {
+    path: String,
+    name: String,
+    /// "bookshelf", "empty", or "occupied" for a folder holding other things.
+    state: &'static str,
+    /// What setting up an occupied folder adds to it.
+    adds: Vec<String>,
+}
+
+/// Looks at a folder before it opens, so the writer can be asked before an occupied one is set up.
+#[tauri::command]
+pub async fn inspect_folder(path: String) -> CmdResult<FolderInfo> {
+    let root = PathBuf::from(&path);
+    let (state, adds) = match scaffold::inspect_folder(&root).or_message()? {
+        scaffold::Folder::Bookshelf => ("bookshelf", Vec::new()),
+        scaffold::Folder::Empty => ("empty", Vec::new()),
+        scaffold::Folder::Occupied(adds) => ("occupied", adds),
+    };
+    Ok(FolderInfo {
+        name: root
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.clone()),
+        path,
+        state,
+        adds,
+    })
+}
+
+/// Where a new bookshelf goes unless the writer chooses somewhere else: their Documents folder.
+#[tauri::command]
+pub fn default_bookshelf_place(app: AppHandle) -> CmdResult<String> {
+    let place = app.path().document_dir().or_else(|_| app.path().home_dir());
+    Ok(place.map_err(|e| e.to_string())?.display().to_string())
+}
+
+/// Makes a new bookshelf called `name` in `place`, then opens it.
+#[tauri::command]
+pub async fn create_bookshelf(
+    place: String,
+    name: String,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+) -> CmdResult<VaultInfo> {
+    let root = scaffold::create_bookshelf(Path::new(&place), &name).or_message()?;
+    enter(&root, &state, &window)
+}
+
+/// Opens a bookshelf, setting it up if it is new, and remembers it for next time. A folder in
+/// story-time 0.1's layout is left as it is until the writer chooses to upgrade it.
 #[tauri::command]
 pub async fn open_vault(
     path: String,
@@ -523,10 +574,15 @@ pub async fn open_vault(
     if !config::Config::load(&root).or_message()?.needs_upgrade() {
         scaffold::init_vault(&root, false).or_message()?;
     }
-    let vault = Vault::open(&root).or_message()?;
+    enter(&root, &state, &window)
+}
+
+/// Makes `root` the open bookshelf, here and the next time the app starts.
+fn enter(root: &Path, state: &AppState, window: &WebviewWindow) -> CmdResult<VaultInfo> {
+    let vault = Vault::open(root).or_message()?;
     config::set_user_default_vault(&vault.root).or_message()?;
     state.remember(vault.root.clone());
-    apply_spelling(&window, spelling_languages(&vault));
+    apply_spelling(window, spelling_languages(&vault));
     Ok(vault_info(&vault))
 }
 
@@ -707,6 +763,24 @@ pub struct CreatedBook {
     project: String,
     book: String,
     title: String,
+    /// The book's first scene, empty and ready to write in.
+    scene: String,
+}
+
+/// The name of the scene a book made in the app starts with. The CLI leaves new books empty,
+/// since its users name their scenes as they add them.
+const FIRST_SCENE: &str = "Scene 1";
+
+fn created_book(vault: &Vault, project: &Project, book: &Book) -> CmdResult<CreatedBook> {
+    let today = Local::now().date_naive();
+    let scene =
+        scaffold::add_scene(vault, project, book, FIRST_SCENE, Place::End, today).or_message()?;
+    Ok(CreatedBook {
+        project: project.slug.clone(),
+        title: book.title(),
+        book: book.slug.clone(),
+        scene: scene.path.display().to_string(),
+    })
 }
 
 fn new_book<'a>(
@@ -745,11 +819,7 @@ pub async fn create_project(
     let idea = from_idea.as_deref().filter(|idea| !idea.trim().is_empty());
     let (project, book) =
         scaffold::start_project(&vault, &spec, idea, Local::now().naive_local()).or_message()?;
-    Ok(CreatedBook {
-        project: project.slug,
-        title: book.title(),
-        book: book.slug,
-    })
+    created_book(&vault, &project, &book)
 }
 
 /// Adds another book to a project.
@@ -766,11 +836,7 @@ pub async fn create_book(
     let spec = new_book(&title, &form, target, &structure)?;
     let book =
         scaffold::start_book(&vault, &project, &spec, Local::now().naive_local()).or_message()?;
-    Ok(CreatedBook {
-        project: project.slug,
-        title: book.title(),
-        book: book.slug,
-    })
+    created_book(&vault, &project, &book)
 }
 
 #[derive(Serialize)]

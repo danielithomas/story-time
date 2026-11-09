@@ -25,6 +25,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
+            commands::inspect_folder,
+            commands::default_bookshelf_place,
+            commands::create_bookshelf,
             commands::open_vault,
             commands::upgrade_vault,
             commands::choices,

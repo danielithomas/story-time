@@ -56,60 +56,67 @@
 <div class="backdrop">
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
   <form onsubmit={submit}>
-    <h2 id="new-project-title">{isBook ? `New book in ${world}` : "New project"}</h2>
+    <h2 id="new-project-title">{isBook ? `New book in ${world}` : "New book"}</h2>
 
     <label class="field">
       <span>Title</span>
       <input bind:value={title} placeholder="The book's working title" use:focus required />
     </label>
+    <p class="hint">
+      {isBook ? `It shares ${world}'s world bible: its characters, locations and world notes. ` : ""}It starts with
+      an empty first scene, ready to write in.
+    </p>
 
-    {#if isBook}
-      <p class="hint">It shares {world}'s world bible: its characters, locations and world notes.</p>
-    {:else}
-      <label class="field">
-        <span>World</span>
-        <input bind:value={worldName} placeholder="Same as the title" />
-      </label>
-      <p class="hint">Name the world if more books may be set in it. Books in one world share its characters, places and world notes.</p>
-    {/if}
+    <details open={!!idea}>
+      <summary>More options</summary>
+      <div class="more">
+        {#if !isBook}
+          <label class="field">
+            <span>World</span>
+            <input bind:value={worldName} placeholder="Same as the title" />
+          </label>
+          <p class="hint">Name the world if more books may be set in it. Books in one world share its characters, places and world notes.</p>
+        {/if}
 
-    {#if ideas.length}
-      <label class="field">
-        <span>Start from an idea</span>
-        <select value={idea} onchange={(e) => pickIdea(e.currentTarget.value)}>
-          <option value="">No: start blank</option>
-          {#each ideas as item (item.name)}
-            <option value={item.name}>{item.name}</option>
-          {/each}
-        </select>
-      </label>
-    {/if}
+        {#if ideas.length}
+          <label class="field">
+            <span>Start from an idea</span>
+            <select value={idea} onchange={(e) => pickIdea(e.currentTarget.value)}>
+              <option value="">No: start blank</option>
+              {#each ideas as item (item.name)}
+                <option value={item.name}>{item.name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
 
-    <div class="pair">
-      <label class="field">
-        <span>Form</span>
-        <select bind:value={form}>
-          {#each app.choices?.forms ?? [] as choice (choice.key)}
-            <option value={choice.key}>{capitalise(choice.label)}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="field">
-        <span>Target words</span>
-        <input type="number" min="0" step="1000" bind:value={target} placeholder="Default for the form" />
-      </label>
-    </div>
-    <p class="hint">{formChoice?.detail}</p>
+        <div class="pair">
+          <label class="field">
+            <span>Form</span>
+            <select bind:value={form}>
+              {#each app.choices?.forms ?? [] as choice (choice.key)}
+                <option value={choice.key}>{capitalise(choice.label)}</option>
+              {/each}
+            </select>
+          </label>
+          <label class="field">
+            <span>Target words</span>
+            <input type="number" min="0" step="1000" bind:value={target} placeholder="Default for the form" />
+          </label>
+        </div>
+        <p class="hint">{formChoice?.detail}</p>
 
-    <label class="field">
-      <span>Story structure</span>
-      <select bind:value={structure}>
-        {#each app.choices?.structures ?? [] as choice (choice.key)}
-          <option value={choice.key}>{choice.label}</option>
-        {/each}
-      </select>
-    </label>
-    <p class="hint">{structureChoice?.detail}. It lays out the story flow note; change anything later.</p>
+        <label class="field">
+          <span>Story structure</span>
+          <select bind:value={structure}>
+            {#each app.choices?.structures ?? [] as choice (choice.key)}
+              <option value={choice.key}>{choice.label}</option>
+            {/each}
+          </select>
+        </label>
+        <p class="hint">{structureChoice?.detail}. It lays out the story flow note; change anything later.</p>
+      </div>
+    </details>
 
     {#if error}
       <p class="error">{error}</p>
@@ -117,7 +124,7 @@
 
     <div class="buttons">
       <button type="button" class="btn" onclick={close}>Cancel</button>
-      <button class="btn primary" disabled={busy || !title.trim()}>{isBook ? "Add book" : "Create project"}</button>
+      <button class="btn primary" disabled={busy || !title.trim()}>{isBook ? "Add book" : "Create book"}</button>
     </div>
   </form>
   </div>
@@ -149,6 +156,18 @@
 
   h2 {
     font-size: 20px;
+  }
+
+  summary {
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .more {
+    display: grid;
+    gap: 0.8rem;
+    margin-top: 0.8rem;
   }
 
   .pair {

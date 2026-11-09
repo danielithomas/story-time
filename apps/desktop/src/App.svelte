@@ -23,7 +23,7 @@
 
 {#if !app.ready}
   <div class="loading"></div>
-{:else if !app.vault || app.vault.needsUpgrade}
+{:else if !app.vault || app.vault.needsUpgrade || app.pendingFolder}
   <Welcome />
 {:else}
   <div class="shell {layout}">
@@ -36,11 +36,11 @@
         <Ideas />
       {:else if !app.slug}
         <div class="start">
-          <h1>No projects yet</h1>
-          <p class="muted">A project is a world: the books set in it, with their scenes, and its characters, places and world notes.</p>
+          <h1>An empty bookshelf</h1>
+          <p class="muted">Start a book and begin on its first scene, or jot down an idea to come back to.</p>
           <div class="actions">
-            <button class="btn primary" onclick={() => openNewProject()}>Start a project</button>
-            <button class="btn" onclick={() => (app.view = "ideas")}>Start from an idea</button>
+            <button class="btn primary" onclick={() => openNewProject()}>Start your first book</button>
+            <button class="btn" onclick={() => (app.view = "ideas")}>Jot down an idea</button>
           </div>
         </div>
       {:else}

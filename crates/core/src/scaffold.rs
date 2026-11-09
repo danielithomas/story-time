@@ -23,7 +23,7 @@ use crate::scratchpad;
 use crate::structures::{self, Structure};
 use crate::templates::{self, render};
 use crate::text::{slugify, unique_slug};
-use crate::vault::{Vault, markdown_files};
+use crate::vault::{Vault, is_hidden, markdown_files};
 
 /// The line `init` adds to the vault's `.gitignore`: compiled manuscripts are rebuilt on demand.
 pub const BUILD_IGNORE: &str = ".story-time/build/";
@@ -80,6 +80,57 @@ pub fn init_vault(root: &Path, overwrite_templates: bool) -> Result<Vec<Step>> {
     }
     Ok(steps)
 }
+
+/// How a folder stands before it opens as a bookshelf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Folder {
+    /// It has story-time's config file: a bookshelf already, perhaps in an older format.
+    Bookshelf,
+    /// Nothing in it but hidden files, if anything, so it can be set up without asking.
+    Empty,
+    /// It holds other files. Setting it up adds these folders to it.
+    Occupied(Vec<String>),
+}
+
+/// Looks at a folder before it opens, so that a writer is asked before story-time sets up a
+/// folder that already holds other things, such as their Documents.
+pub fn inspect_folder(root: &Path) -> Result<Folder> {
+    if root.join(META_DIR).join(CONFIG_FILE).is_file() {
+        return Ok(Folder::Bookshelf);
+    }
+    let mut entries = fs::read_dir(root).with_context(|| format!("reading {}", root.display()))?;
+    if !entries.any(|entry| entry.is_ok_and(|entry| !is_hidden(&entry.path()))) {
+        return Ok(Folder::Empty);
+    }
+    let adds = [META_DIR, &Config::default().templates_dir]
+        .into_iter()
+        .filter(|name| !root.join(name).exists())
+        .map(|name| format!("{name}/"))
+        .collect();
+    Ok(Folder::Occupied(adds))
+}
+
+/// Makes a bookshelf called `name` in `parent`, and sets it up. The folder may already exist
+/// only if it's empty.
+pub fn create_bookshelf(parent: &Path, name: &str) -> Result<PathBuf> {
+    let name = name.trim();
+    if name.is_empty() || name.starts_with('.') || name.contains(FORBIDDEN_IN_NAMES) {
+        bail!("choose a name that doesn't start with a dot or use any of / \\ : * ? \" < > |");
+    }
+    let root = parent.join(name);
+    if root.exists() && inspect_folder(&root)? != Folder::Empty {
+        bail!(
+            "{} already exists. Open it, or choose another name.",
+            root.display()
+        );
+    }
+    fs::create_dir_all(&root).with_context(|| format!("creating {}", root.display()))?;
+    init_vault(&root, false)?;
+    Ok(root)
+}
+
+/// Characters a folder name can't hold on one system or another.
+const FORBIDDEN_IN_NAMES: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
 
 /// Adds `line` to the end of a file unless the file already has it.
 pub(crate) fn add_line(path: &Path, line: &str) -> Result<Step> {
@@ -743,6 +794,41 @@ mod tests {
         assert!(init_vault(dir.path(), false).is_err());
         assert!(!dir.path().join("templates").exists());
         assert!(Vault::open(dir.path()).is_err());
+    }
+
+    #[test]
+    fn asks_before_setting_up_a_folder_that_holds_other_things() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir(root.join(".git")).unwrap();
+        assert_eq!(inspect_folder(root).unwrap(), Folder::Empty);
+
+        fs::write(root.join("letters.txt"), "").unwrap();
+        fs::create_dir(root.join("templates")).unwrap();
+        assert_eq!(
+            inspect_folder(root).unwrap(),
+            Folder::Occupied(vec![".story-time/".to_string()])
+        );
+
+        init_vault(root, false).unwrap();
+        assert_eq!(inspect_folder(root).unwrap(), Folder::Bookshelf);
+    }
+
+    #[test]
+    fn creates_a_bookshelf_only_where_there_is_nothing_yet() {
+        let dir = TempDir::new().unwrap();
+        let root = create_bookshelf(dir.path(), " Stories ").unwrap();
+        assert_eq!(root, dir.path().join("Stories"));
+        assert!(root.join(".story-time/config.toml").is_file());
+        assert!(Vault::open(&root).unwrap().projects().unwrap().is_empty());
+
+        let again = create_bookshelf(dir.path(), "Stories").unwrap_err();
+        assert!(again.to_string().contains("already exists"), "{again}");
+        fs::create_dir(dir.path().join("Empty")).unwrap();
+        assert!(create_bookshelf(dir.path(), "Empty").is_ok());
+        for bad in ["", ".hidden", "a/b", "what?"] {
+            assert!(create_bookshelf(dir.path(), bad).is_err(), "{bad:?}");
+        }
     }
 
     fn book(title: &str) -> NewBook<'_> {

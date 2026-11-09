@@ -8,6 +8,16 @@ export interface VaultInfo {
   needsUpgrade: boolean;
 }
 
+/** A folder the writer picked, before it opens. */
+export interface FolderInfo {
+  path: string;
+  name: string;
+  /** "occupied" when it holds other things, so the writer is asked before it's set up. */
+  state: "bookshelf" | "empty" | "occupied";
+  /** What setting up an occupied folder adds to it. */
+  adds: string[];
+}
+
 export interface Choice {
   key: string;
   label: string;
@@ -49,6 +59,8 @@ export interface CreatedBook {
   project: string;
   book: string;
   title: string;
+  /** The book's first scene, empty and ready to write in. */
+  scene: string;
 }
 
 export interface NoteRef {

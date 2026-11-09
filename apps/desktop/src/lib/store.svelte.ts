@@ -13,6 +13,7 @@ import { formatNumber, plural } from "./format";
 import type {
   BibleKind,
   Choices,
+  FolderInfo,
   NoteDoc,
   NoteRef,
   ProjectSummary,
@@ -46,6 +47,10 @@ interface Toast {
 export const app = $state({
   ready: false,
   vault: null as VaultInfo | null,
+  /** The welcome screen's form for starting a bookshelf is showing. */
+  starting: false,
+  /** A folder holding other things, waiting for the writer to say it may be set up. */
+  pendingFolder: null as FolderInfo | null,
   choices: null as Choices | null,
   projects: [] as ProjectSummary[],
   /** The open project, and the book open in it. */
@@ -125,17 +130,55 @@ async function enterVault() {
   await refreshToday();
 }
 
+/** Opens a bookshelf the writer picks. A folder holding other things waits for them to agree first. */
 export async function chooseVault() {
-  const picked = await open({ directory: true, multiple: false, title: "Choose your bookshelf" });
+  const picked = await open({ directory: true, multiple: false, title: "Open a bookshelf" });
   if (typeof picked !== "string") return;
+  try {
+    const folder = await api.inspectFolder(picked);
+    if (folder.state === "occupied") app.pendingFolder = folder;
+    else await openFolder(picked);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Sets up and opens the folder the writer agreed to. */
+export async function setUpPendingFolder() {
+  const folder = app.pendingFolder;
+  app.pendingFolder = null;
+  if (folder) await openFolder(folder.path);
+}
+
+async function openFolder(path: string) {
   if (!(await settle())) return;
   try {
-    app.vault = await api.openVault(picked);
+    app.vault = await api.openVault(path);
     app.view = "write";
     if (!app.vault.needsUpgrade) await enterVault();
   } catch (error) {
     toastError(error);
   }
+}
+
+/** Asks where a new bookshelf should go, starting from `current`. */
+export async function chooseBookshelfPlace(current: string): Promise<string | null> {
+  const picked = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: current || undefined,
+    title: "Where should the bookshelf go?",
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Makes a new bookshelf and opens it. Errors are left to the caller, which shows them in its form. */
+export async function startBookshelf(place: string, name: string) {
+  if (!(await settle())) return;
+  app.vault = await api.createBookshelf(place, name);
+  app.starting = false;
+  app.view = "write";
+  await enterVault();
 }
 
 /** Upgrades a folder in story-time 0.1's layout, then opens it. */
@@ -156,8 +199,11 @@ async function loadProjects() {
   app.projects = await api.listProjects();
 }
 
-/** Opens a project, with `book` (else the book last open in it, else its first) open in it. */
-export async function selectProject(slug: string, book: string | null = null) {
+/**
+ * Opens a project, with `book` (else the book last open in it, else its first) open in it, and
+ * `note` (else the note last open, else the book note) in the editor.
+ */
+export async function selectProject(slug: string, book: string | null = null, note: string | null = null) {
   if (!(await settle())) return;
   try {
     app.slug = slug;
@@ -168,7 +214,7 @@ export async function selectProject(slug: string, book: string | null = null) {
     const last = remembered(`note:${slug}`);
     const known = allNotes(app.tree).some((note) => note.path === last);
     const start = app.tree.book?.note.path ?? app.tree.projectNote.path;
-    await openNote(known && last && !book ? last : start, false);
+    await openNote(note ?? (known && last && !book ? last : start), false);
   } catch (error) {
     toastError(error);
   }
@@ -261,7 +307,7 @@ export async function createProject(args: {
   const created = await api.createProject(args);
   app.newProject = null;
   await loadProjects();
-  await selectProject(created.project, created.book);
+  await selectProject(created.project, created.book, created.scene);
   app.view = "write";
   toast(`Started ${created.title}.`);
 }
@@ -272,7 +318,7 @@ export async function createBook(args: { title: string; form: string; target: nu
   const created = await api.createBook({ slug: app.slug, ...args });
   app.newProject = null;
   await loadProjects();
-  await selectProject(created.project, created.book);
+  await selectProject(created.project, created.book, created.scene);
   app.view = "write";
   toast(`Added ${created.title}.`);
 }

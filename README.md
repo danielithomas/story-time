@@ -128,7 +128,8 @@ Nothing is changed if a file is in the way of a move; the upgrade says which. To
 
 ## The desktop app
 
-Story Time is a dedicated writing program laid out like Scrivener:
+Story Time is a dedicated writing program laid out like Scrivener. The first time it opens, it offers to start a bookshelf, by default `Stories` in your Documents folder, or to open one you already have. Before setting up a folder that already holds other files, it says what it will add and asks. A new book opens on an empty first scene, ready to write in; the new-book dialog needs only a title, with the world, form, target and structure under **More options**.
+
 
 - **Binder** (left): the open book's overview and story flow; its contents, part by part and chapter by chapter, with each scene's status and word count; its unplaced scenes; then the world bible: the project's overview, timeline, characters, locations and world notes; then the world's research and scratchpad, and the general research and scratchpad that belong to no world, with the ideas file. A `+` adds a scene at the end, to a chapter, or unplaced, a world-bible or research note, or an empty scrap. With more than one book in a project, the top bar picks the book; **+ New** adds another book set in the same world, or starts a new project.
 - **Editor** (centre): a distraction-free page in Literata, with spellcheck, find and replace (Ctrl+F), and Markdown that is styled rather than shown raw. `%% notes to self %%` are dimmed.
@@ -198,7 +199,7 @@ Development builds (`npm run tauri dev`) read three optional variables, handled 
 | Variable | Effect |
 |---|---|
 | `VITE_START_VIEW=board` | Open straight into a view (`write`, `board`, `progress`, `check`, `ideas`, `focus`, `new-project`, `new-book`). |
-| `VITE_SNAPSHOT_DIR=/tmp/shots` | Tour every screen and save a PNG of each, made by WebKitGTK from the window's own contents (Linux only). Along the way it types a test sentence into the open note through the editor, which exercises autosave. |
+| `VITE_SNAPSHOT_DIR=/tmp/shots` | Tour every screen and save a PNG of each, made by WebKitGTK from the window's own contents (Linux only). With no bookshelf set, it shows the screens before one opens: welcome, starting a bookshelf, and asking before setting up a folder. Along the way it types a test sentence into the open note through the editor, which exercises autosave. |
 | `VITE_THEME=light` | Use the light palette whatever the system prefers. |
 
 Point the app at a throwaway folder by giving it its own config and data directories, so your real stories and settings are untouched:

@@ -211,6 +211,7 @@ Settings added by later features, such as git (#22), are documented with them.
 ## Versions and upgrades
 
 - `story-time init` writes `format = 1` (#6).
+- **A folder without `.story-time/config.toml`** isn't a bookshelf yet. Setting it up, with `story-time init` or by opening it in the app, writes the current format. The app asks first when the folder already holds other files (#31).
 - **A bookshelf without a `format` key** uses the unversioned layout from before this document. story-time offers to upgrade it after making a backup. The upgrade renames files and folders to kebab-case, with each note's name kept in `aliases`, and moves the folders and files at its root to `scratchpad/`, `scratchpad/ideas.md` and `templates/`. It moves each project's characters, locations and world notes into `bible/`, and turns the project into a single-book project whose chapters become scenes, listed in the book's contents in their old order.
 - **A bookshelf with a newer format** than story-time knows is refused with a clear message, never edited.
 

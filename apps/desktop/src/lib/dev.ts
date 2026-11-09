@@ -16,14 +16,29 @@ export async function run() {
   const env = import.meta.env;
   if (env.VITE_THEME) document.documentElement.dataset.theme = env.VITE_THEME;
   if (env.VITE_SNAPSHOT_DIR && (!app.vault || app.vault.needsUpgrade)) {
-    await wait(1500);
-    const screen = app.vault ? "upgrade" : "welcome";
-    await invoke("dev_snapshot", { path: `${env.VITE_SNAPSHOT_DIR}/${screen}.png` });
+    await welcomeTour(env.VITE_SNAPSHOT_DIR);
     return;
   }
   if (!app.vault || app.vault.needsUpgrade) return;
   if (env.VITE_SNAPSHOT_DIR) await snapshotTour(env.VITE_SNAPSHOT_DIR);
   else if (env.VITE_START_VIEW) await startView(env.VITE_START_VIEW);
+}
+
+/** The screens before a bookshelf opens: welcome, starting one, and asking before setting one up. */
+async function welcomeTour(dir: string) {
+  const shot = async (name: string) => {
+    await wait(800);
+    await invoke("dev_snapshot", { path: `${dir}/${name}.png` });
+  };
+  await wait(700);
+  if (app.vault) return shot("upgrade");
+  await shot("welcome");
+  app.starting = true;
+  await shot("start");
+  app.starting = false;
+  app.pendingFolder = { path: "/home/writer/Documents", name: "Documents", state: "occupied", adds: [".story-time/", "templates/"] };
+  await shot("set-up");
+  app.pendingFolder = null;
 }
 
 async function startView(start: string) {

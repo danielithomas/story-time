@@ -10,6 +10,7 @@ import type {
   Choices,
   CompileResult,
   CreatedBook,
+  FolderInfo,
   Idea,
   NoteDoc,
   ProjectSummary,
@@ -23,6 +24,9 @@ import type {
 
 export const api = {
   vaultStatus: () => invoke<VaultInfo | null>("vault_status"),
+  inspectFolder: (path: string) => invoke<FolderInfo>("inspect_folder", { path }),
+  defaultBookshelfPlace: () => invoke<string>("default_bookshelf_place"),
+  createBookshelf: (place: string, name: string) => invoke<VaultInfo>("create_bookshelf", { place, name }),
   openVault: (path: string) => invoke<VaultInfo>("open_vault", { path }),
   /** Returns where the backup of the folder as it was is kept. */
   upgradeVault: () => invoke<string>("upgrade_vault"),
