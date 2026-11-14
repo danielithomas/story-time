@@ -14,6 +14,8 @@ import type {
   FolderInfo,
   Idea,
   NoteDoc,
+  NoteLinks,
+  RelocatedNote,
   RenamedNote,
   ProjectSummary,
   ProjectTree,
@@ -82,6 +84,12 @@ export const api = {
   /** Undoes the book's latest move, and returns what moved back, or null if there was none to undo. */
   undoMove: (slug: string, book: string | null) => invoke<string | null>("undo_move", { slug, book }),
   renameNote: (path: string, name: string | null) => invoke<RenamedNote>("rename_note", { path, name }),
+  linksToNote: (path: string) => invoke<NoteLinks>("links_to_note", { path }),
+  /** Moves a note to the system trash, and returns its name. */
+  deleteNote: (path: string) => invoke<string>("delete_note", { path }),
+  cutScene: (path: string) => invoke<RelocatedNote>("cut_scene", { path }),
+  putBackScene: (path: string, slug: string, book: string | null) =>
+    invoke<RelocatedNote>("put_back_scene", { path, slug, book }),
   addScrap: (slug: string | null) => invoke<AddedNote>("add_scrap", { slug }),
   addResearch: (slug: string | null, name: string) => invoke<AddedNote>("add_research", { slug, name }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),

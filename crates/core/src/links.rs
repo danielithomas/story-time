@@ -11,12 +11,15 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use regex::Captures;
 
-use crate::note::Note;
-use crate::vault::Vault;
+use crate::note::{Note, split_frontmatter, write_atomically};
+use crate::text::yaml_escape;
+use crate::vault::{Vault, markdown_files};
 use crate::words::{WIKILINK, strip_comments};
 
 /// A `[[target|text]]` link as written, without any `#heading` or `^block` part.
@@ -219,6 +222,189 @@ impl LinkIndex {
     }
 }
 
+/// After the note at `from` has moved to `to` (been renamed, or moved to another folder), rewrites
+/// the links that no longer reach what they meant: every link to the note, and the note's own
+/// links that don't reach their notes from where it is now. `before` indexes the bookshelf as it
+/// was. Link text showing one of `old_names` shows `name`; other text is kept, and a link that
+/// still works is left as written. The ideas file and templates are never edited. Returns how many
+/// links were rewritten, in how many notes.
+pub(crate) fn relink(
+    vault: &Vault,
+    before: &LinkIndex,
+    from: &Path,
+    to: &Path,
+    old_names: &[String],
+    name: &str,
+) -> Result<(usize, usize)> {
+    let relinker = Relinker {
+        before,
+        after: &LinkIndex::build(vault)?,
+        from,
+        to,
+        old_names,
+        name,
+        titles: HashMap::new(),
+    };
+    let (mut links, mut notes) = (0, 0);
+    let ideas = vault.ideas_path();
+    let templates = vault.templates_dir();
+    let mut relinker = relinker;
+    for file in markdown_files(&vault.root)? {
+        if file == ideas || file.starts_with(&templates) {
+            continue;
+        }
+        let content =
+            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+        let (rewritten, count) = relinker.relink(&file, &content);
+        if count > 0 {
+            write_atomically(&file, &rewritten)?;
+            links += count;
+            notes += 1;
+        }
+    }
+    Ok((links, notes))
+}
+
+struct Relinker<'a> {
+    before: &'a LinkIndex,
+    after: &'a LinkIndex,
+    from: &'a Path,
+    to: &'a Path,
+    old_names: &'a [String],
+    name: &'a str,
+    /// Names of the notes the moved note links to, read as needed.
+    titles: HashMap<PathBuf, Option<String>>,
+}
+
+impl Relinker<'_> {
+    /// `content`, the text of the note at `file`, with its links rewritten, and how many were.
+    fn relink(&mut self, file: &Path, content: &str) -> (String, usize) {
+        let moved = file == self.to;
+        // The moved note's links are resolved from where it was.
+        let was = if moved { self.from } else { file };
+        let frontmatter_end = match split_frontmatter(content) {
+            (Some(yaml), _) => 4 + yaml.len(),
+            (None, _) => 0,
+        };
+        let mut count = 0;
+        let rewritten = WIKILINK.replace_all(content, |c: &Captures| {
+            let whole = c.get(0).expect("a match").as_str();
+            let start = c.get(0).expect("a match").start();
+            let written = &c[1];
+            let (target, rest) =
+                written.split_at(written.find(['#', '^']).unwrap_or(written.len()));
+            let target = target.trim();
+            let Resolution::Found(meant) = self.before.resolve(was, target) else {
+                return whole.to_string();
+            };
+            let to_moved = meant == self.from;
+            let now = if to_moved {
+                self.to.to_path_buf()
+            } else {
+                meant
+            };
+            let is_note = now.extension().is_some_and(|ext| ext == "md");
+            if !is_note || !(to_moved || moved) {
+                return whole.to_string();
+            }
+            // Obsidian follows a bare link by file name only, never by alias.
+            let still_reaches = self.after.resolve(file, target) == Resolution::Found(now.clone())
+                && (target.contains('/')
+                    || now
+                        .file_stem()
+                        .is_some_and(|stem| stem.to_string_lossy().eq_ignore_ascii_case(target)));
+            let new_target = if still_reaches {
+                target.to_string()
+            } else {
+                self.after.link_target(file, &now)
+            };
+            let retargeted = new_target != target;
+            let embed = content[..start].ends_with('!');
+            let text = match c.get(2).map(|text| text.as_str()) {
+                Some(text)
+                    if to_moved
+                        && self
+                            .old_names
+                            .iter()
+                            .any(|old| text.trim().eq_ignore_ascii_case(old)) =>
+                {
+                    Some(self.name.to_string())
+                }
+                Some(text) => Some(text.to_string()),
+                None if embed || !retargeted => None,
+                // A retargeted link shows the note's name, unless the target already does.
+                None => {
+                    let shown = if to_moved {
+                        Some(self.name.to_string())
+                    } else {
+                        self.title(&now)
+                    };
+                    shown.filter(|shown| *shown != new_target)
+                }
+            };
+            let to = format!("{new_target}{rest}");
+            let mut link = match text {
+                Some(text) => format!("[[{to}|{text}]]"),
+                None => format!("[[{to}]]"),
+            };
+            if start < frontmatter_end {
+                let line_start = content[..start].rfind('\n').map_or(0, |i| i + 1);
+                match quoting(&content[line_start..start]) {
+                    Some('"') => link = yaml_escape(&link),
+                    Some(_) => link = link.replace('\'', "''"),
+                    None => {}
+                }
+            }
+            if link == whole {
+                return link;
+            }
+            count += 1;
+            link
+        });
+        (rewritten.into_owned(), count)
+    }
+
+    fn title(&mut self, path: &Path) -> Option<String> {
+        self.titles
+            .entry(path.to_path_buf())
+            .or_insert_with(|| Note::load(path).ok().map(|note| note.title()))
+            .clone()
+    }
+}
+
+/// The quote a YAML line is inside at the end of `prefix`, if any: `"` or `'`.
+fn quoting(prefix: &str) -> Option<char> {
+    let mut quote = None;
+    let mut last = ' ';
+    let mut chars = prefix.chars().peekable();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some('"'), '\\') => {
+                chars.next();
+            }
+            (Some('"'), '"') => quote = None,
+            (Some('\''), '\'') => {
+                if chars.peek() == Some(&'\'') {
+                    chars.next();
+                } else {
+                    quote = None;
+                }
+            }
+            // A quote opens a scalar only at its start.
+            (None, '"' | '\'') if matches!(last, ' ' | ':' | '-' | '[' | ',') => {
+                quote = Some(c);
+            }
+            _ => {}
+        }
+        if !c.is_whitespace() || quote.is_some() {
+            last = c;
+        } else {
+            last = ' ';
+        }
+    }
+    quote
+}
+
 /// Removes `.` and `..` from a path without touching the filesystem.
 pub(crate) fn normalise(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -416,5 +602,15 @@ mod tests {
                 Resolution::Found(root.join(to))
             );
         }
+    }
+
+    #[test]
+    fn finds_the_quote_a_property_is_in() {
+        assert_eq!(quoting("pov: \""), Some('"'));
+        assert_eq!(quoting("  - '"), Some('\''));
+        assert_eq!(quoting("synopsis: Mara's "), None);
+        assert_eq!(quoting("pov: \"[[a]] and \\\" "), Some('"'));
+        assert_eq!(quoting("pov: 'it''s "), Some('\''));
+        assert_eq!(quoting("pov: \"done\" "), None);
     }
 }

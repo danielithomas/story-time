@@ -1,7 +1,8 @@
 <script lang="ts">
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
-  import { app, linkFrom, renameNote, setProperty, toastError } from "../lib/store.svelte";
+  import { app, cutScene, linkFrom, putBackScene, renameNote, setProperty, toastError } from "../lib/store.svelte";
   import type { NoteRef } from "../lib/types";
+  import DeleteNote from "./DeleteNote.svelte";
 
   const doc = $derived(app.doc);
 
@@ -59,6 +60,15 @@
       toastError(error);
     }
   }
+
+  /** Kinds of note that can be deleted from here; a book's and world's own notes can't. */
+  const DELETABLE = ["scene", "character", "location", "world", "research", "scrap"];
+  let deleting = $state(false);
+
+  /** A scene cut to this world's scratchpad, which can go back into the open book. */
+  const canPutBack = $derived(
+    doc?.kind === "scrap" && doc.properties.type === "scene" && doc.project === app.slug && !!app.tree?.book,
+  );
 
   /** The note's other names: its aliases after the first, which is its name. */
   const otherNames = $derived.by(() => {
@@ -302,6 +312,18 @@
       </p>
     {/if}
 
+    {#if DELETABLE.includes(doc.kind)}
+      <div class="note-actions">
+        {#if doc.kind === "scene"}
+          <button class="btn" onclick={() => cutScene(doc.path)}>Cut to the scratchpad</button>
+        {/if}
+        {#if canPutBack}
+          <button class="btn" onclick={() => putBackScene(doc.path)}>Put back into {app.tree?.book?.summary.title}</button>
+        {/if}
+        <button class="btn danger" onclick={() => (deleting = true)}>Delete…</button>
+      </div>
+    {/if}
+
     <div class="facts">
       <span>{plural(app.docWords, "word")}</span>
       {#if doc.kind === "book" && app.tree?.book}
@@ -314,7 +336,17 @@
   {/if}
 </aside>
 
+{#if deleting && doc}
+  <DeleteNote {doc} close={() => (deleting = false)} />
+{/if}
+
 <style>
+  .note-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
   .inspector {
     grid-area: inspector;
     overflow-y: auto;

@@ -1,0 +1,408 @@
+//! Deleting a note, and cutting a scene from its book to its world's scratchpad.
+//!
+//! Deleting hands the note to a `discard` function: in the app, the system trash, so it can be
+//! restored. A scene comes out of its book's contents first. Links to a deleted note stay as they
+//! were and lead nowhere until it's restored, as `check` reports; `links_to` counts them first.
+//!
+//! Cutting moves a scene to its world's scratchpad and out of its book's contents, keeping its
+//! properties, so it can go back into a book unchanged: `put_back` moves it into a book as an
+//! unplaced scene. Links to it, and its own links, are rewritten where they would no longer reach
+//! the same notes.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+
+use crate::contents::{self, Spot};
+use crate::home::Home;
+use crate::links::{self, LinkIndex, Resolution};
+use crate::note::Note;
+use crate::project::{Book, Project};
+use crate::vault::{Vault, markdown_files};
+
+/// Links to the note at `path` from other notes: how many, and in how many notes.
+pub fn links_to(vault: &Vault, path: &Path) -> Result<(usize, usize)> {
+    let index = LinkIndex::build(vault)?;
+    let meant = Resolution::Found(path.to_path_buf());
+    let (mut count, mut notes) = (0, 0);
+    for file in markdown_files(&vault.root)? {
+        if file == path {
+            continue;
+        }
+        let content =
+            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+        let here = links::links(&content)
+            .iter()
+            .filter(|link| index.resolve(&file, &link.target) == meant)
+            .count();
+        if here > 0 {
+            count += here;
+            notes += 1;
+        }
+    }
+    Ok((count, notes))
+}
+
+/// Whether the note at `path` can be deleted: a scene, world-bible note, research or a scrap.
+pub fn can_delete(vault: &Vault, path: &Path) -> bool {
+    matches!(Home::of(vault, path), Ok(Some(_)))
+}
+
+/// Deletes the note at `path` by handing it to `discard`, after taking a scene out of its book's
+/// contents. Returns its name.
+pub fn delete(
+    vault: &Vault,
+    path: &Path,
+    discard: impl FnOnce(&Path) -> Result<()>,
+) -> Result<String> {
+    let Some(home) = Home::of(vault, path)? else {
+        bail!(
+            "only scenes, world-bible notes, research and scraps can be deleted here; {} isn't one",
+            vault.relative(path).display()
+        );
+    };
+    let name = Note::load(path)?.title();
+    if let Home::Scene { book, .. } = &home {
+        contents::move_scene(vault, book, &book.hash, path, &Spot::Unplaced)?;
+    }
+    discard(path).with_context(|| format!("deleting {}", vault.relative(path).display()))?;
+    Ok(name)
+}
+
+/// Where a cut or put-back scene is now, and how many links were rewritten in how many notes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relocated {
+    pub path: PathBuf,
+    pub name: String,
+    pub links: usize,
+    pub notes: usize,
+}
+
+/// Cuts a scene from its book to its world's scratchpad, taking it out of the book's contents.
+/// Refused if another note in the world has its file name, since the scratchpad shares the
+/// world's names: renaming the scene first gets round that.
+pub fn cut(vault: &Vault, path: &Path) -> Result<Relocated> {
+    let Some(Home::Scene { project, book }) = Home::of(vault, path)? else {
+        bail!(
+            "only a scene in a book can be cut; {} isn't one",
+            vault.relative(path).display()
+        );
+    };
+    let to = project.scratchpad_dir().join(file_name(path)?);
+    if let Some(other) = same_name_in(&project, None, path)? {
+        bail!(
+            "{} already has a note called {}, at {}: rename the scene, then cut it",
+            project.title(),
+            stem(path),
+            vault.relative(&other).display()
+        );
+    }
+    contents::move_scene(vault, &book, &book.hash, path, &Spot::Unplaced)?;
+    relocate(vault, path, &to)
+}
+
+/// Puts a scene that was cut to its world's scratchpad back into `book`, one of that world's
+/// books, as an unplaced scene. Refused for any other scrap, and if `book` already has a scene by
+/// that name, or another note in the world has its file name.
+pub fn put_back(vault: &Vault, path: &Path, book: &Book) -> Result<Relocated> {
+    let note = Note::load(path)?;
+    let is_cut_scene = note.frontmatter.str("type").as_deref() == Some("scene");
+    let project = match Home::of(vault, path)? {
+        Some(Home::Scrap {
+            project: Some(project),
+            ..
+        }) if is_cut_scene => project,
+        _ => bail!(
+            "only a scene cut to a world's scratchpad can be put back into a book; {} isn't one",
+            vault.relative(path).display()
+        ),
+    };
+    if book.project != project.slug {
+        bail!("{} isn't one of {}'s books", book.title(), project.title());
+    }
+    let name = note.title();
+    if book
+        .scenes()?
+        .iter()
+        .any(|scene| scene.title().eq_ignore_ascii_case(&name))
+    {
+        bail!(
+            "{} already has a scene called {name}: rename one of them, then put it back",
+            book.title()
+        );
+    }
+    if let Some(other) = same_name_in(&project, Some(book), path)? {
+        bail!(
+            "{} already has a note called {}, at {}: rename the scene, then put it back",
+            project.title(),
+            stem(path),
+            vault.relative(&other).display()
+        );
+    }
+    relocate(vault, path, &book.scenes_dir().join(file_name(path)?))
+}
+
+/// Another note in `project` with the same file name as `path`, leaving out the scenes of books
+/// other than `book` (which may share names) when moving into a book.
+fn same_name_in(project: &Project, book: Option<&Book>, path: &Path) -> Result<Option<PathBuf>> {
+    let others: Vec<PathBuf> = match book {
+        Some(book) => project
+            .books()?
+            .iter()
+            .filter(|other| other.dir != book.dir)
+            .map(Book::scenes_dir)
+            .collect(),
+        None => Vec::new(),
+    };
+    let wanted = stem(path).to_lowercase();
+    Ok(markdown_files(&project.dir)?.into_iter().find(|other| {
+        other != path
+            && !others.iter().any(|dir| other.starts_with(dir))
+            && stem(other).to_lowercase() == wanted
+    }))
+}
+
+/// Moves the note at `from` to `to` and rewrites the links that would no longer reach it, or
+/// that it would no longer follow.
+fn relocate(vault: &Vault, from: &Path, to: &Path) -> Result<Relocated> {
+    if to.exists() {
+        bail!("{} already exists", vault.relative(to).display());
+    }
+    let name = Note::load(from)?.title();
+    let before = LinkIndex::build(vault)?;
+    let dir = to.parent().context("a note is in a folder")?;
+    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    fs::rename(from, to).with_context(|| {
+        format!(
+            "moving {} to {}",
+            vault.relative(from).display(),
+            vault.relative(to).display()
+        )
+    })?;
+    let (links, notes) = links::relink(vault, &before, from, to, &[], &name)?;
+    Ok(Relocated {
+        path: to.to_path_buf(),
+        name,
+        links,
+        notes,
+    })
+}
+
+fn file_name(path: &Path) -> Result<&std::ffi::OsStr> {
+    path.file_name().context("a note has a file name")
+}
+
+fn stem(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::check;
+    use crate::contents::Place;
+    use crate::note::{PropertyValue, set_properties};
+    use crate::project::{Form, NoteKind};
+    use crate::scaffold::{
+        NewBook, NewProject, add_book, add_note, add_scene, add_scrap, create_project,
+    };
+    use crate::structures::THREE_ACT;
+    use chrono::NaiveDate;
+    use std::cell::Cell;
+    use tempfile::TempDir;
+
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, 14).unwrap()
+    }
+
+    fn new_book(title: &str) -> NewBook<'_> {
+        NewBook {
+            title,
+            form: Form::Novel,
+            target: None,
+            structure: &THREE_ACT,
+            premise: None,
+        }
+    }
+
+    fn project(vault: &Vault, title: &str) -> (Project, Book) {
+        let new = NewProject {
+            world: None,
+            book: new_book(title),
+        };
+        create_project(vault, &new, today()).unwrap()
+    }
+
+    fn reload(book: &Book) -> Book {
+        Book::load(&book.dir, &book.project).unwrap().unwrap()
+    }
+
+    fn scene(vault: &Vault, project: &Project, book: &Book, name: &str) -> PathBuf {
+        add_scene(vault, project, &reload(book), name, Place::End, today())
+            .unwrap()
+            .path
+    }
+
+    fn placed(book: &Book) -> Vec<String> {
+        let contents = reload(book).contents().unwrap();
+        contents.placed().map(|scene| scene.title()).collect()
+    }
+
+    fn vault() -> (TempDir, Vault) {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("shelf/.obsidian")).unwrap();
+        let vault = Vault::open(dir.path().join("shelf")).unwrap();
+        (dir, vault)
+    }
+
+    #[test]
+    fn deletes_to_the_trash_and_out_of_the_contents() {
+        let (dir, vault) = vault();
+        let (project, book) = project(&vault, "Sample Story");
+        let arrival = scene(&vault, &project, &book, "Arrival");
+        scene(&vault, &project, &book, "Leaving Home");
+        let mara = add_note(&vault, &project, NoteKind::Character, "Mara", today())
+            .unwrap()
+            .path;
+        let pov = PropertyValue::Text("[[mara|Mara]]".into());
+        let text = set_properties(&fs::read_to_string(&arrival).unwrap(), &[("pov", pov)]);
+        fs::write(&arrival, text).unwrap();
+        assert_eq!(links_to(&vault, &mara).unwrap(), (1, 1));
+
+        let trash = dir.path().join("trash");
+        fs::create_dir(&trash).unwrap();
+        let to_trash = |path: &Path| {
+            fs::rename(path, trash.join(path.file_name().unwrap())).map_err(Into::into)
+        };
+        assert_eq!(delete(&vault, &mara, to_trash).unwrap(), "Mara");
+        assert!(!mara.exists() && trash.join("mara.md").exists());
+        let report = check::check(&vault, &project).unwrap();
+        assert!(
+            report.undocumented.contains_key("mara"),
+            "the link to it leads nowhere until it's restored"
+        );
+
+        assert_eq!(delete(&vault, &arrival, to_trash).unwrap(), "Arrival");
+        assert!(trash.join("arrival.md").exists());
+        assert_eq!(placed(&book), ["Leaving Home"]);
+        assert!(!reload(&book).note.body.contains("arrival"));
+
+        let called = Cell::new(false);
+        for path in [
+            &book.note.path,
+            &project.note.path,
+            &book.flow_path(),
+            &vault.ideas_path(),
+        ] {
+            let result = delete(&vault, path, |_| {
+                called.set(true);
+                Ok(())
+            });
+            assert!(result.is_err(), "{}", path.display());
+        }
+        assert!(
+            !called.get(),
+            "nothing is discarded when a delete is refused"
+        );
+        let leaving = book.scenes_dir().join("leaving-home.md");
+        assert!(delete(&vault, &leaving, |_| bail!("no trash here")).is_err());
+        assert!(leaving.exists());
+    }
+
+    #[test]
+    fn cuts_a_scene_to_the_scratchpad_and_puts_it_back() {
+        let (_dir, vault) = vault();
+        let (project, one) = project(&vault, "Sample Story");
+        let two = add_book(&vault, &project, &new_book("Second Story"), today()).unwrap();
+        let arrival = scene(&vault, &project, &one, "Arrival");
+        let morning = scene(&vault, &project, &one, "Morning");
+        scene(&vault, &project, &two, "Morning");
+        // Two worlds have a Mara, so a link to this one is a path, which a move must follow.
+        let mara = add_note(&vault, &project, NoteKind::Character, "Mara", today())
+            .unwrap()
+            .path;
+        let (other, _) = project_named(&vault, "Other Story");
+        add_note(&vault, &other, NoteKind::Character, "Mara", today()).unwrap();
+        let pov = LinkIndex::build(&vault)
+            .unwrap()
+            .link(&arrival, &mara, "Mara");
+        assert_eq!(pov, "[[../../../bible/characters/mara|Mara]]");
+        let text = set_properties(
+            &fs::read_to_string(&arrival).unwrap(),
+            &[("pov", PropertyValue::Text(pov))],
+        );
+        fs::write(&arrival, text).unwrap();
+        let flow = one.flow_path();
+        fs::write(&flow, "See [[arrival|Arrival]].\n").unwrap();
+
+        let cut_one = cut(&vault, &arrival).unwrap();
+        let in_scratchpad = project.scratchpad_dir().join("arrival.md");
+        assert_eq!(cut_one.path, in_scratchpad);
+        assert_eq!(placed(&one), ["Morning"]);
+        let note = Note::load(&in_scratchpad).unwrap();
+        assert_eq!(
+            note.frontmatter.str("type").as_deref(),
+            Some("scene"),
+            "it keeps its properties"
+        );
+        assert_eq!(
+            note.frontmatter.str("pov").as_deref(),
+            Some("[[../bible/characters/mara|Mara]]"),
+            "its own links still reach their notes"
+        );
+        let index = LinkIndex::build(&vault).unwrap();
+        assert_eq!(
+            index.resolve(&flow, "arrival"),
+            Resolution::Found(in_scratchpad.clone())
+        );
+        assert_eq!(
+            fs::read_to_string(&flow).unwrap(),
+            "See [[arrival|Arrival]].\n"
+        );
+
+        let clash = cut(&vault, &morning).unwrap_err().to_string();
+        assert!(
+            clash.contains("already has a note called morning"),
+            "{clash}"
+        );
+        assert!(morning.exists());
+
+        let back = put_back(&vault, &in_scratchpad, &reload(&two)).unwrap();
+        assert_eq!(back.path, two.scenes_dir().join("arrival.md"));
+        let contents = reload(&two).contents().unwrap();
+        let unplaced: Vec<String> = contents.unplaced.iter().map(|s| s.title()).collect();
+        assert_eq!(unplaced, ["Arrival"]);
+        let note = Note::load(&back.path).unwrap();
+        assert_eq!(
+            note.frontmatter.str("pov").as_deref(),
+            Some("[[../../../bible/characters/mara|Mara]]")
+        );
+
+        let scrap = add_scrap(
+            &vault,
+            Some(&project),
+            "A line.",
+            None,
+            today().and_hms_opt(9, 0, 0).unwrap(),
+        )
+        .unwrap()
+        .path;
+        assert!(
+            put_back(&vault, &scrap, &reload(&one)).is_err(),
+            "only a cut scene goes back"
+        );
+        let again = cut(&vault, &back.path).unwrap();
+        let (_, elsewhere) = project_named(&vault, "Third Story");
+        assert!(
+            put_back(&vault, &again.path, &elsewhere).is_err(),
+            "only into its own world"
+        );
+    }
+
+    fn project_named(vault: &Vault, title: &str) -> (Project, Book) {
+        project(vault, title)
+    }
+}

@@ -87,6 +87,20 @@ export interface AddedNote extends NoteRef {
   sameName: string | null;
 }
 
+/** Links to a note from other notes, which deleting it would leave leading nowhere. */
+export interface NoteLinks {
+  links: number;
+  notes: number;
+}
+
+/** Where a cut or put-back scene is now, and how many links were rewritten in how many notes. */
+export interface RelocatedNote {
+  path: string;
+  name: string;
+  links: number;
+  notes: number;
+}
+
 /** What a rename did: where the note is now, its name, and how many links changed in how many notes. */
 export interface RenamedNote {
   path: string;

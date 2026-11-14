@@ -9,22 +9,22 @@
 //! contents list is links, so renaming a scene keeps its place. The ideas file and templates are
 //! never edited.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use regex::Captures;
 
-use crate::links::{LinkIndex, Resolution};
+use crate::home::Home;
+use crate::links::{self, LinkIndex};
 use crate::note::{
     Note, PropertyValue, replace_body, set_properties, split_frontmatter, write_atomically,
 };
-use crate::project::{Book, NoteKind, Project};
+use crate::project::{NoteKind, Project};
 use crate::scaffold::{project_stems, stems};
 use crate::scratchpad;
-use crate::text::{name_from_file, slugify, unique_slug, yaml_escape};
+use crate::text::{name_from_file, slugify, unique_slug};
 use crate::vault::{Vault, markdown_files};
-use crate::words::WIKILINK;
 
 /// What a rename did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,101 +41,56 @@ pub struct Renamed {
     pub same_name: Option<PathBuf>,
 }
 
-/// Where a note that can be renamed belongs, which decides the names it can't share.
-enum Home {
-    Scene {
-        project: Project,
-        book: Box<Book>,
-    },
-    Bible {
-        project: Project,
-        kind: NoteKind,
-    },
-    Research {
-        project: Option<Project>,
-        dir: PathBuf,
-    },
-}
-
-impl Home {
-    fn find(vault: &Vault, path: &Path) -> Result<Home> {
-        if path.starts_with(vault.research_dir()) {
-            let dir = vault.research_dir();
-            return Ok(Home::Research { project: None, dir });
-        }
-        let project = vault
-            .projects()?
-            .into_iter()
-            .find(|project| path.starts_with(&project.dir));
-        if let Some(project) = project {
-            if path.starts_with(project.research_dir()) {
-                let dir = project.research_dir();
-                return Ok(Home::Research {
-                    project: Some(project),
-                    dir,
-                });
-            }
-            let kind = [NoteKind::Character, NoteKind::Location, NoteKind::World]
-                .into_iter()
-                .find(|kind| path.starts_with(project.folder(*kind)));
-            if let Some(kind) = kind {
-                return Ok(Home::Bible { project, kind });
-            }
-            let book = project
-                .books()?
-                .into_iter()
-                .find(|book| path.starts_with(book.scenes_dir()));
-            if let Some(book) = book {
-                return Ok(Home::Scene {
-                    project,
-                    book: Box::new(book),
-                });
-            }
-        }
-        bail!(
+/// Where the note at `path` belongs, if it's one that can be renamed: anything but a scrap.
+fn renamable(vault: &Vault, path: &Path) -> Result<Home> {
+    match Home::of(vault, path)? {
+        Some(Home::Scrap { .. }) | None => bail!(
             "only scenes, characters, locations, world notes and research can be renamed; {} \
              isn't one",
             vault.relative(path).display()
-        )
+        ),
+        Some(home) => Ok(home),
     }
+}
 
-    /// The notes a new name can't be shared with, who they belong to, and what they are.
-    fn siblings(&self) -> Result<(Vec<Note>, String, &'static str)> {
-        Ok(match self {
-            Home::Scene { book, .. } => {
-                let scenes = book.scenes()?.into_iter().map(|scene| scene.note).collect();
-                (scenes, book.title(), "a scene")
-            }
-            Home::Bible { project, kind } => (
-                project.notes(*kind)?,
-                project.title(),
-                match kind {
-                    NoteKind::Character => "a character",
-                    NoteKind::Location => "a location",
-                    _ => "a world note",
-                },
-            ),
-            Home::Research { project, dir } => (
-                scratchpad::research(dir)?,
-                project
-                    .as_ref()
-                    .map_or_else(|| "The bookshelf".to_string(), Project::title),
-                "research",
-            ),
-        })
-    }
-
-    /// File names already taken where the note's file name must be unique.
-    fn taken(&self) -> Result<std::collections::HashSet<String>> {
-        match self {
-            Home::Scene { project, book } => project_stems(project, Some(book)),
-            Home::Bible { project, .. } => project_stems(project, None),
-            Home::Research {
-                project: Some(project),
-                ..
-            } => project_stems(project, None),
-            Home::Research { project: None, dir } => stems(dir),
+/// The notes a new name can't be shared with, who they belong to, and what they are.
+fn siblings(home: &Home) -> Result<(Vec<Note>, String, &'static str)> {
+    Ok(match home {
+        Home::Scene { book, .. } => {
+            let scenes = book.scenes()?.into_iter().map(|scene| scene.note).collect();
+            (scenes, book.title(), "a scene")
         }
+        Home::Bible { project, kind } => (
+            project.notes(*kind)?,
+            project.title(),
+            match kind {
+                NoteKind::Character => "a character",
+                NoteKind::Location => "a location",
+                _ => "a world note",
+            },
+        ),
+        Home::Research { project, dir } => (
+            scratchpad::research(dir)?,
+            project
+                .as_ref()
+                .map_or_else(|| "The bookshelf".to_string(), Project::title),
+            "research",
+        ),
+        Home::Scrap { .. } => unreachable!("scraps aren't renamed"),
+    })
+}
+
+/// File names already taken where the note's file name must be unique.
+fn taken(home: &Home) -> Result<HashSet<String>> {
+    match home {
+        Home::Scene { project, book } => project_stems(project, Some(book)),
+        Home::Bible { project, .. }
+        | Home::Research {
+            project: Some(project),
+            ..
+        } => project_stems(project, None),
+        Home::Research { project: None, dir } => stems(dir),
+        Home::Scrap { .. } => unreachable!("scraps aren't renamed"),
     }
 }
 
@@ -145,7 +100,7 @@ impl Home {
 /// book for a scene, else in the same project (or the bookshelf's research).
 pub fn rename(vault: &Vault, path: &Path, name: Option<&str>) -> Result<Renamed> {
     let note = Note::load(path)?;
-    let home = Home::find(vault, path)?;
+    let home = renamable(vault, path)?;
     let old_name = note.title();
     let name = name
         .map(|name| name.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -157,7 +112,7 @@ pub fn rename(vault: &Vault, path: &Path, name: Option<&str>) -> Result<Renamed>
     if name.contains(['[', ']', '|']) {
         bail!("a name can't contain [, ] or |, which would break links to it");
     }
-    let (siblings, owner, what) = home.siblings()?;
+    let (siblings, owner, what) = siblings(&home)?;
     if siblings
         .iter()
         .any(|other| other.path != path && other.title().eq_ignore_ascii_case(&name))
@@ -168,7 +123,7 @@ pub fn rename(vault: &Vault, path: &Path, name: Option<&str>) -> Result<Renamed>
     let slug = if slug == stem {
         slug
     } else {
-        let mut taken = home.taken()?;
+        let mut taken = taken(&home)?;
         taken.remove(&stem);
         unique_slug(&slug, |candidate| taken.contains(candidate))
     };
@@ -200,40 +155,16 @@ pub fn rename(vault: &Vault, path: &Path, name: Option<&str>) -> Result<Renamed>
             )
         })?;
     }
-    let after = LinkIndex::build(vault)?;
     // Link text showing the old name, or the name the file was given, shows the new one.
     let old_names = [old_name.clone(), name_from_file(&note.name)];
-    let relinker = Relinker {
-        before: &before,
-        after: &after,
-        old_path: path,
-        new_path: &new_path,
-        old_names: &old_names,
-        name: &name,
-    };
-    let (mut links, mut notes) = (0, 0);
-    let ideas = vault.ideas_path();
-    let templates = vault.templates_dir();
-    for file in markdown_files(&vault.root)? {
-        if file == ideas || file.starts_with(&templates) {
-            continue;
-        }
-        let content =
-            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-        let (rewritten, count) = relinker.relink(&file, &content);
-        if count > 0 {
-            write_atomically(&file, &rewritten)?;
-            links += count;
-            notes += 1;
-        }
-    }
+    let (links, notes) = links::relink(vault, &before, path, &new_path, &old_names, &name)?;
     let same_name = vault.note_named(&slug, &new_path)?;
     Ok(renamed(links, notes, same_name))
 }
 
 /// Whether the note at `path` is one that can be renamed: a scene, a world-bible note or research.
 pub fn can_rename(vault: &Vault, path: &Path) -> bool {
-    path.extension().is_some_and(|ext| ext == "md") && Home::find(vault, path).is_ok()
+    renamable(vault, path).is_ok()
 }
 
 /// The note `query` means: a path to it, from `cwd` or the bookshelf, or a name or file name that
@@ -253,7 +184,7 @@ pub fn find(vault: &Vault, cwd: &Path, query: &str) -> Result<PathBuf> {
         let stem = path.file_stem().unwrap_or_default().to_string_lossy();
         let matches = stem.eq_ignore_ascii_case(wanted)
             || Note::load(&path)?.title().eq_ignore_ascii_case(wanted);
-        if matches && Home::find(vault, &path).is_ok() {
+        if matches && can_rename(vault, &path) {
             found.push(path);
         }
     }
@@ -301,113 +232,12 @@ fn named(content: &str, note: &Note, old_name: &str, name: &str) -> String {
     }
 }
 
-/// Rewrites the links that meant a renamed note.
-struct Relinker<'a> {
-    before: &'a LinkIndex,
-    after: &'a LinkIndex,
-    old_path: &'a Path,
-    new_path: &'a Path,
-    old_names: &'a [String],
-    name: &'a str,
-}
-
-impl Relinker<'_> {
-    /// `content`, the text of the note at `file`, with every link that meant the renamed note
-    /// rewritten, and how many there were.
-    fn relink(&self, file: &Path, content: &str) -> (String, usize) {
-        // The renamed note's own links are resolved from where it was.
-        let was = if file == self.new_path {
-            self.old_path
-        } else {
-            file
-        };
-        let frontmatter_end = match split_frontmatter(content) {
-            (Some(yaml), _) => 4 + yaml.len(),
-            (None, _) => 0,
-        };
-        let mut count = 0;
-        let rewritten = WIKILINK.replace_all(content, |c: &Captures| {
-            let whole = c.get(0).expect("a match");
-            let written = &c[1];
-            let (target, rest) =
-                written.split_at(written.find(['#', '^']).unwrap_or(written.len()));
-            let meant = self.before.resolve(was, target.trim());
-            if meant != Resolution::Found(self.old_path.to_path_buf()) {
-                return whole.as_str().to_string();
-            }
-            count += 1;
-            let to = format!("{}{rest}", self.after.link_target(file, self.new_path));
-            let embed = content[..whole.start()].ends_with('!');
-            let text = match c.get(2).map(|text| text.as_str()) {
-                Some(text)
-                    if self
-                        .old_names
-                        .iter()
-                        .any(|old| text.trim().eq_ignore_ascii_case(old)) =>
-                {
-                    Some(self.name.to_string())
-                }
-                Some(text) => Some(text.to_string()),
-                None if embed || to == self.name => None,
-                None => Some(self.name.to_string()),
-            };
-            let link = match text {
-                Some(text) => format!("[[{to}|{text}]]"),
-                None => format!("[[{to}]]"),
-            };
-            if whole.start() < frontmatter_end {
-                let line_start = content[..whole.start()].rfind('\n').map_or(0, |i| i + 1);
-                match quoting(&content[line_start..whole.start()]) {
-                    Some('"') => return yaml_escape(&link),
-                    Some(_) => return link.replace('\'', "''"),
-                    None => {}
-                }
-            }
-            link
-        });
-        (rewritten.into_owned(), count)
-    }
-}
-
-/// The quote a YAML line is inside at the end of `prefix`, if any: `"` or `'`.
-fn quoting(prefix: &str) -> Option<char> {
-    let mut quote = None;
-    let mut last = ' ';
-    let mut chars = prefix.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (quote, c) {
-            (Some('"'), '\\') => {
-                chars.next();
-            }
-            (Some('"'), '"') => quote = None,
-            (Some('\''), '\'') => {
-                if chars.peek() == Some(&'\'') {
-                    chars.next();
-                } else {
-                    quote = None;
-                }
-            }
-            // A quote opens a scalar only at its start.
-            (None, '"' | '\'') if matches!(last, ' ' | ':' | '-' | '[' | ',') => {
-                quote = Some(c);
-            }
-            _ => {}
-        }
-        if !c.is_whitespace() || quote.is_some() {
-            last = c;
-        } else {
-            last = ' ';
-        }
-    }
-    quote
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::check;
     use crate::contents::{self, Place};
-    use crate::project::Form;
+    use crate::project::{Book, Form};
     use crate::scaffold::{NewBook, NewProject, add_note, add_scene, create_project};
     use crate::structures::THREE_ACT;
     use chrono::NaiveDate;
@@ -610,15 +440,5 @@ mod tests {
 
         let again = rename(&s.vault, &renamed.path, None).unwrap();
         assert_eq!((again.links, again.notes), (0, 0), "nothing left to do");
-    }
-
-    #[test]
-    fn finds_the_quote_a_property_is_in() {
-        assert_eq!(quoting("pov: \""), Some('"'));
-        assert_eq!(quoting("  - '"), Some('\''));
-        assert_eq!(quoting("synopsis: Mara's "), None);
-        assert_eq!(quoting("pov: \"[[a]] and \\\" "), Some('"'));
-        assert_eq!(quoting("pov: 'it''s "), Some('\''));
-        assert_eq!(quoting("pov: \"done\" "), None);
     }
 }

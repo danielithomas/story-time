@@ -130,6 +130,16 @@ button {
   border-color: transparent;
 }
 
+/* For actions that remove something: deleting a note. */
+.btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn.danger:hover {
+  background: var(--danger-soft);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: default;

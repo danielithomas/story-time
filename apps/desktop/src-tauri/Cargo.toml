@@ -20,6 +20,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 toml = "1"
+trash = "5"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Both must match the versions Tauri uses. webkit2gtk switches on WebKitGTK's spellchecker;

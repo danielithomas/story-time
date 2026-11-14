@@ -21,6 +21,7 @@ import type {
   ProjectSummary,
   ProjectTree,
   PropertyValue,
+  RelocatedNote,
   SceneRef,
   ScenePlace,
   SceneSpot,
@@ -449,6 +450,55 @@ export async function renameNote(path: string, name: string | null): Promise<boo
   } catch (error) {
     toastError(error);
     return false;
+  }
+}
+
+/**
+ * Deletes a scene, world-bible note, research or scrap by moving it to the system trash, where it can be restored. A
+ * scene comes out of its book's contents first. If it was open, its book (or world) opens instead.
+ */
+export async function deleteNote(path: string) {
+  if (!app.slug || !(await settle())) return;
+  try {
+    const name = await api.deleteNote(path);
+    app.tree = await api.projectTree(app.slug, app.book);
+    if (app.doc?.path === path) await openNote(app.tree.book?.note.path ?? app.tree.projectNote.path, false);
+    toast(`Moved ${name} to the system trash. Restore it from there if you need it back.`);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Cuts a scene from its book to its world's scratchpad, out of the book's contents. It stays open. */
+export async function cutScene(path: string) {
+  await relocated(path, () => api.cutScene(path), (moved) => {
+    const world = app.tree?.project.title ?? "the world";
+    return `Cut ${moved.name} to ${world}'s scratchpad. It keeps its properties, so it can go back into a book.`;
+  });
+}
+
+/** Puts a scene that was cut back into the open book, as an unplaced scene. It stays open. */
+export async function putBackScene(path: string) {
+  if (!app.slug) return;
+  const [slug, book] = [app.slug, app.book];
+  await relocated(path, () => api.putBackScene(path, slug, book), (moved) => {
+    const title = app.tree?.book?.summary.title ?? "the book";
+    return `Put ${moved.name} back into ${title}, unplaced. Drag it into a chapter on the Board.`;
+  });
+}
+
+async function relocated(path: string, move: () => Promise<RelocatedNote>, describe: (moved: RelocatedNote) => string) {
+  if (!app.slug || !(await settle())) return;
+  try {
+    const moved = await move();
+    app.tree = await api.projectTree(app.slug, app.book);
+    if (app.doc?.path === path) {
+      setDoc(await api.readNote(moved.path));
+      remember(`note:${app.slug}`, moved.path);
+    }
+    toast(describe(moved));
+  } catch (error) {
+    toastError(error);
   }
 }
 

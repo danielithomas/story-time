@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use story_time_core::backup;
 use story_time_core::compile::{self, Format};
 use story_time_core::contents::{self, ChapterSpot, Contents, Moved, Place, Spot};
+use story_time_core::delete;
 use story_time_core::example;
 use story_time_core::history::History;
 use story_time_core::ideas;
@@ -1142,6 +1143,76 @@ pub async fn rename_note(
             .same_name
             .map(|path| vault.relative(&path).display().to_string()),
     })
+}
+
+/// Links to a note from other notes, which deleting it would leave leading nowhere.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteLinks {
+    links: usize,
+    notes: usize,
+}
+
+#[tauri::command]
+pub async fn links_to_note(path: String, state: State<'_, AppState>) -> CmdResult<NoteLinks> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    let (links, notes) = delete::links_to(&vault, &path).or_message()?;
+    Ok(NoteLinks { links, notes })
+}
+
+/// Deletes a scene, world-bible note, research or scrap by moving it to the system trash, where
+/// it can be restored; a scene comes out of its book's contents first. Returns its name.
+#[tauri::command]
+pub async fn delete_note(path: String, state: State<'_, AppState>) -> CmdResult<String> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    delete::delete(&vault, &path, |path| {
+        trash::delete(path).map_err(|e| anyhow::anyhow!("couldn't move it to the trash: {e}"))
+    })
+    .or_message()
+}
+
+/// Where a cut or put-back scene is now, and how many links were rewritten in how many notes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocatedNote {
+    path: String,
+    name: String,
+    links: usize,
+    notes: usize,
+}
+
+fn relocated(moved: delete::Relocated) -> RelocatedNote {
+    RelocatedNote {
+        path: moved.path.display().to_string(),
+        name: moved.name,
+        links: moved.links,
+        notes: moved.notes,
+    }
+}
+
+/// Cuts a scene from its book to its world's scratchpad, out of the book's contents.
+#[tauri::command]
+pub async fn cut_scene(path: String, state: State<'_, AppState>) -> CmdResult<RelocatedNote> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    Ok(relocated(delete::cut(&vault, &path).or_message()?))
+}
+
+/// Puts a scene that was cut back into one of its world's books, as an unplaced scene.
+#[tauri::command]
+pub async fn put_back_scene(
+    path: String,
+    slug: String,
+    book: Option<String>,
+    state: State<'_, AppState>,
+) -> CmdResult<RelocatedNote> {
+    let (vault, _, book) = state.book(&slug, book.as_deref())?;
+    let path = note_path(&vault, &path)?;
+    Ok(relocated(
+        delete::put_back(&vault, &path, &book).or_message()?,
+    ))
 }
 
 /// The project with this slug, or `None` for the vault itself.
