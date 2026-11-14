@@ -1,15 +1,16 @@
 //! A project is a world: `<slug>/<slug>.md`, its world bible in `bible/`, and one or more books
 //! in `books/<book>/`, each with its own note, story flow and scenes.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
 
 use crate::contents::{self, Contents, Listing};
 use crate::ids;
 use crate::links::links;
-use crate::note::{Note, section};
+use crate::note::{Note, content_hash, section};
 use crate::text::{natural_cmp, slugify};
 use crate::vault::markdown_files;
 use crate::words;
@@ -371,6 +372,9 @@ pub struct Book {
     pub slug: String,
     pub dir: PathBuf,
     pub note: Note,
+    /// The book note's content hash when it was read, so changes to its contents can be refused
+    /// if the note has changed on disk since.
+    pub hash: String,
     /// The slug of the project the book belongs to.
     pub project: String,
 }
@@ -388,8 +392,11 @@ impl Book {
         if !note_path.is_file() {
             return Ok(None);
         }
+        let content = fs::read_to_string(&note_path)
+            .with_context(|| format!("reading {}", note_path.display()))?;
         Ok(Some(Book {
-            note: Note::load(&note_path)?,
+            note: Note::parse(&note_path, &content),
+            hash: content_hash(&content),
             dir: dir.to_path_buf(),
             slug,
             project: project.to_string(),

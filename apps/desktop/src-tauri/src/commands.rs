@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use chrono::{Days, Local};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use story_time_core::backup;
 use story_time_core::compile::{self, Format};
-use story_time_core::contents::{Contents, Place};
+use story_time_core::contents::{self, ChapterSpot, Contents, Moved, Place, Spot};
 use story_time_core::example;
 use story_time_core::history::History;
 use story_time_core::ideas;
@@ -292,6 +292,9 @@ pub struct ProjectTree {
 pub struct BookTree {
     summary: BookSummary,
     note: NoteRef,
+    /// The book note's content hash, which moves on the Board send back so they act on the
+    /// contents as shown.
+    hash: String,
     flow_note: Option<NoteRef>,
     has_parts: bool,
     parts: Vec<PartRef>,
@@ -331,6 +334,7 @@ fn book_tree(book: &Book) -> CmdResult<BookTree> {
     Ok(BookTree {
         summary: book_summary(book, &contents),
         note: note_ref(&book.note),
+        hash: book.hash.clone(),
         flow_note,
         has_parts: contents.has_parts(),
         parts,
@@ -1007,6 +1011,98 @@ pub async fn add_scene(
     )
     .or_message()?;
     added_note(&vault, added)
+}
+
+/// Where the Board moves a scene: `{"before": path}`, `{"chapter": n}`, `"end"` or `"unplaced"`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SceneSpot {
+    Before(String),
+    Chapter(usize),
+    End,
+    Unplaced,
+}
+
+/// Where the Board moves a chapter: `{"before": n}`, `{"after": n}` or `{"part": n}`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChapterPlace {
+    Before(usize),
+    After(usize),
+    Part(usize),
+}
+
+/// A move on the Board, and the contents as they were, for undoing it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveResult {
+    hash: String,
+    previous: Vec<String>,
+}
+
+fn move_result(moved: Option<Moved>) -> Option<MoveResult> {
+    moved.map(|moved| MoveResult {
+        hash: moved.hash,
+        previous: moved.previous,
+    })
+}
+
+/// Moves a scene in a book's contents, unless the book note has changed since `base_hash`.
+/// Returns `None` if the scene was there already.
+#[tauri::command]
+pub async fn move_scene(
+    slug: String,
+    book: Option<String>,
+    base_hash: String,
+    scene: String,
+    to: SceneSpot,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<MoveResult>> {
+    let (vault, _, book) = state.book(&slug, book.as_deref())?;
+    let scene = note_path(&vault, &scene)?;
+    let to = match to {
+        SceneSpot::Before(other) => Spot::Before(note_path(&vault, &other)?),
+        SceneSpot::Chapter(n) => Spot::Chapter(n),
+        SceneSpot::End => Spot::End,
+        SceneSpot::Unplaced => Spot::Unplaced,
+    };
+    let moved = contents::move_scene(&vault, &book, &base_hash, &scene, &to).or_message()?;
+    Ok(move_result(moved))
+}
+
+/// Moves a chapter, counting from 0 across parts, with its scenes, unless the book note has
+/// changed since `base_hash`. Returns `None` if it was there already.
+#[tauri::command]
+pub async fn move_chapter(
+    slug: String,
+    book: Option<String>,
+    base_hash: String,
+    chapter: usize,
+    to: ChapterPlace,
+    state: State<'_, AppState>,
+) -> CmdResult<Option<MoveResult>> {
+    let (_, _, book) = state.book(&slug, book.as_deref())?;
+    let to = match to {
+        ChapterPlace::Before(n) => ChapterSpot::Before(n),
+        ChapterPlace::After(n) => ChapterSpot::After(n),
+        ChapterPlace::Part(n) => ChapterSpot::Part(n),
+    };
+    let moved = contents::move_chapter(&book, &base_hash, chapter, to).or_message()?;
+    Ok(move_result(moved))
+}
+
+/// Undoes a move: puts back a book's contents as they were, unless the book note has changed
+/// since `base_hash`. Returns the note's new hash.
+#[tauri::command]
+pub async fn restore_contents(
+    slug: String,
+    book: Option<String>,
+    base_hash: String,
+    previous: Vec<String>,
+    state: State<'_, AppState>,
+) -> CmdResult<String> {
+    let (_, _, book) = state.book(&slug, book.as_deref())?;
+    contents::restore(&book, &base_hash, &previous).or_message()
 }
 
 /// The project with this slug, or `None` for the vault itself.

@@ -40,4 +40,4 @@ A book is made of scenes. In this one, each scene explains a part of Story Time 
 
 ## Notes
 
-The contents list above is the book's order. To move a scene, move its line: Story Time reads the order from this list, so no file is ever renamed or numbered.
+The contents list above is the book's order. To move a scene, drag it on the Board or move its line here: Story Time reads the order from this list, so no file is ever renamed or numbered.

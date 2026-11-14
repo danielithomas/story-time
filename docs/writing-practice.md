@@ -73,7 +73,7 @@ The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop a
 
 Ordered roughly by value for effort:
 
-1. **Desktop app, next steps.** Drag scenes on the Board to reorder them (rewriting the book's contents), delete notes, and testing the Windows and macOS installers.
+1. **Desktop app, next steps.** Delete notes, and test the Windows and macOS installers.
 2. **Renaming.** Rename a note and update every `[[link]]` to it, from the CLI and the app, and offer it for the names `check` reports. Today that means renaming in Obsidian, which updates links itself.
 3. **Style-sheet check.** Flag near-miss spellings of bible names and terms (*Marra* for *Mara*) using edit distance.
 4. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.

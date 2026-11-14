@@ -139,15 +139,17 @@ Story Time is a dedicated writing program laid out like Scrivener. The first tim
 - **Binder** (left): the open book's overview and story flow; its contents, part by part and chapter by chapter, with each scene's status and word count; its unplaced scenes; then the world bible: the project's overview, timeline, characters, locations and world notes; then the world's research and scratchpad, and the general research and scratchpad that belong to no world, with the ideas file. A `+` adds a scene at the end, to a chapter, or unplaced, a world-bible or research note, or an empty scrap. With more than one book in a project, the top bar picks the book; **+ New** adds another book set in the same world, or starts a new project.
 - **Editor** (centre): a distraction-free page in Literata, with spellcheck, find and replace (Ctrl+F), and Markdown that is styled rather than shown raw. `%% notes to self %%` are dimmed.
 - **Inspector** (right): the open note's properties, such as a scene's place in the book, status, point of view, location, time and synopsis, a book's status, form, target and deadline, a world's genres, or a research note's source.
-- **Views:** *Board* (scene cards with synopses, grouped by chapter), *Progress* (target, deadline pacing, last 30 days, scenes by status), *Check* (world-bible gaps, with one-click "create this note"), *Ideas* (capture ideas, or start a project from one).
+- **Views:** *Board* (scene cards with synopses, grouped by chapter, to reorder by dragging), *Progress* (target, deadline pacing, last 30 days, scenes by status), *Check* (world-bible gaps, with one-click "create this note"), *Ideas* (capture ideas, or start a project from one).
 - **Focus mode** (F11, Esc to leave): just the page, full screen.
 - **Settings** (click the bookshelf's name in the top bar, or Ctrl+,): the bookshelf's daily goal, author name and spelling languages, saved in its `.story-time/config.toml` with the file's comments kept; where the bookshelf is, opening another or starting a new one; and, for this computer, backups and the colours (the system's, light or dark).
+
+**Reordering on the Board.** Drag a scene's card to move it within its chapter, into another chapter, into a new chapter at the end, or to Unplaced, and drag an unplaced scene into the book. Drag a chapter by its heading to move it with all its scenes, into another part if you like. With a card or a chapter's handle selected, Alt and the arrow keys move it one place. A chapter that a move leaves empty stays, ready for other scenes. Each move rewrites only the book's contents list, renaming nothing; Undo in the message that follows, or Ctrl+Z on the Board, puts it back. If the book note changed elsewhere since the Board showed it, nothing moves and the Board catches up.
 
 Writing saves itself a moment after you stop typing. Before every save, Story Time checks that the file hasn't changed on disk since it was opened, for example in Obsidian or through OneDrive sync. If it has, nothing is overwritten: you choose which version to keep. Switching back to the window reloads a note that was edited elsewhere.
 
 **Backups.** The app backs the open bookshelf up by itself: once a day while it's open and again when it closes, unless nothing has changed. Each copy is a zip of the whole bookshelf, apart from `.git/` and compiled output, kept outside the bookshelf so a synced folder doesn't upload it and git doesn't see it. A later copy replaces that day's earlier one, and the copies from the 30 most recent days that have one are kept. To restore, unzip what you need. Settings for each computer, in the app's Settings or `~/.config/story-time/config.toml`, turn automatic backups off (`backup = false`) or put them elsewhere (`backup_folder = "..."`), such as a USB drive or another cloud folder, so one lost disk doesn't take both.
 
-Shortcuts: Ctrl+S save now, Ctrl+1–5 switch views, Ctrl+, settings, Ctrl+F find, F11 focus mode.
+Shortcuts: Ctrl+S save now, Ctrl+1–5 switch views, Ctrl+, settings, Ctrl+F find, F11 focus mode, Ctrl+Z on the Board to undo a move.
 
 ### Running it
 
@@ -207,7 +209,7 @@ Development builds (`npm run tauri dev`) read three optional variables, handled 
 | Variable | Effect |
 |---|---|
 | `VITE_START_VIEW=board` | Open straight into a view (`write`, `board`, `progress`, `check`, `ideas`, `settings`, `focus`, `new-project`, `new-book`). |
-| `VITE_SNAPSHOT_DIR=/tmp/shots` | Tour every screen and save a PNG of each, made by WebKitGTK from the window's own contents (Linux only). With no bookshelf set, it shows the screens before one opens: welcome, starting a bookshelf, and asking before setting up a folder. Along the way it types a test sentence into the open note through the editor, which exercises autosave. |
+| `VITE_SNAPSHOT_DIR=/tmp/shots` | Tour every screen and save a PNG of each, made by WebKitGTK from the window's own contents (Linux only). With no bookshelf set, it shows the screens before one opens: welcome, starting a bookshelf, and asking before setting up a folder. Along the way it types a test sentence into the open note through the editor, which exercises autosave, and on the Board drags the second scene before the first and undoes it, then starts dragging the last chapter and cancels. |
 | `VITE_THEME=light` | Use the light palette whatever the system prefers. |
 
 Point the app at a throwaway folder by giving it its own config and data directories, so your real stories and settings are untouched:

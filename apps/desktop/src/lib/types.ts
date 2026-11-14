@@ -136,6 +136,8 @@ export interface ProjectTree {
 export interface BookTree {
   summary: BookSummary;
   note: NoteRef;
+  /** The book note's content hash, sent back with moves so they act on the contents as shown. */
+  hash: string;
   flowNote: NoteRef | null;
   hasParts: boolean;
   parts: PartRef[];
@@ -238,3 +240,15 @@ export type BibleKind = "character" | "location" | "world";
 
 /** Where a new scene goes: at the end of a chapter (by index), at the end of the contents as a chapter of its own, or unplaced. */
 export type ScenePlace = { chapter: number } | "end" | "unplaced";
+
+/** Where a moved scene goes: just before another scene (by path), or anywhere a new scene can. */
+export type SceneSpot = { before: string } | ScenePlace;
+
+/** Where a moved chapter goes: just before or after another chapter (by index), or first in a part (by index). */
+export type ChapterSpot = { before: number } | { after: number } | { part: number };
+
+/** A move on the Board: the book note's new hash, and its contents as they were, for undoing it. */
+export interface MoveResult {
+  hash: string;
+  previous: string[];
+}

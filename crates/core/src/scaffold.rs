@@ -1216,4 +1216,152 @@ mod tests {
         }
         assert!(vault.projects().unwrap().is_empty());
     }
+
+    #[test]
+    fn moves_scenes_and_chapters_in_the_book_note_and_puts_them_back() {
+        use crate::contents::{ChapterSpot, Spot, move_chapter, move_scene, restore};
+
+        let (_dir, vault) = vault();
+        let (project, book) = create_project(&vault, &standalone("Sample Story"), today()).unwrap();
+        let load = || Book::load(&book.dir, &project.slug).unwrap().unwrap();
+        let scene = |name, place| {
+            add_scene(&vault, &project, &load(), name, place, today())
+                .unwrap()
+                .path
+        };
+        let arrival = scene("Arrival", Place::End);
+        let first_light = scene("First Light", Place::Chapter(0));
+        let leaving = scene("Leaving Home", Place::End);
+        let fragment = scene("Fragment", Place::Unplaced);
+        let order = || {
+            let contents = load().contents().unwrap();
+            let chapters: Vec<Vec<String>> = contents
+                .chapters()
+                .map(|chapter| chapter.scenes.iter().map(Scene::title).collect())
+                .collect();
+            (
+                chapters,
+                contents
+                    .unplaced
+                    .iter()
+                    .map(Scene::title)
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let original = fs::read_to_string(&book.note.path).unwrap();
+        let empty: Vec<&str> = Vec::new();
+
+        let before = load();
+        let moved = move_scene(
+            &vault,
+            &before,
+            &before.hash,
+            &leaving,
+            &Spot::Before(arrival.clone()),
+        )
+        .unwrap()
+        .unwrap();
+        let after_first = [
+            vec!["Leaving Home", "Arrival", "First Light"],
+            empty.clone(),
+        ];
+        assert_eq!(order().0, after_first, "the emptied chapter stays");
+        assert_eq!(moved.hash, load().hash);
+        assert!(
+            move_scene(&vault, &before, &before.hash, &arrival, &Spot::End).is_err(),
+            "a stale hash moves nothing"
+        );
+        assert_eq!(order().0, after_first);
+
+        let book_now = load();
+        move_scene(
+            &vault,
+            &book_now,
+            &book_now.hash,
+            &fragment,
+            &Spot::Chapter(1),
+        )
+        .unwrap();
+        assert!(
+            load().note.body.contains("  - [[fragment|Fragment]]"),
+            "linked as Obsidian follows it"
+        );
+        let book_now = load();
+        move_scene(
+            &vault,
+            &book_now,
+            &book_now.hash,
+            &first_light,
+            &Spot::Unplaced,
+        )
+        .unwrap();
+        let (chapters, unplaced) = order();
+        assert_eq!(
+            chapters,
+            [vec!["Leaving Home", "Arrival"], vec!["Fragment"]]
+        );
+        assert_eq!(unplaced, ["First Light"]);
+        let book_now = load();
+        assert_eq!(
+            move_scene(
+                &vault,
+                &book_now,
+                &book_now.hash,
+                &first_light,
+                &Spot::Unplaced
+            )
+            .unwrap(),
+            None,
+            "already unplaced"
+        );
+        move_scene(&vault, &book_now, &book_now.hash, &arrival, &Spot::End).unwrap();
+        let book_now = load();
+        move_chapter(&book_now, &book_now.hash, 2, ChapterSpot::Before(0)).unwrap();
+        let reordered = [vec!["Arrival"], vec!["Leaving Home"], vec!["Fragment"]];
+        assert_eq!(order().0, reordered);
+
+        // Undoing each move in turn, newest first, gets back the note as it was.
+        let mut undo = Vec::new();
+        let mut book_now = load();
+        for to in [
+            Spot::Before(leaving.clone()),
+            Spot::Unplaced,
+            Spot::Chapter(2),
+        ] {
+            let moved = move_scene(&vault, &book_now, &book_now.hash, &arrival, &to)
+                .unwrap()
+                .unwrap();
+            undo.push(moved.previous);
+            book_now = load();
+        }
+        assert_eq!(
+            order().0,
+            [empty, vec!["Leaving Home"], vec!["Fragment", "Arrival"]]
+        );
+        while let Some(previous) = undo.pop() {
+            let hash = restore(&book_now, &book_now.hash, &previous).unwrap();
+            book_now = load();
+            assert_eq!(hash, book_now.hash);
+        }
+        assert_eq!(order().0, reordered);
+        let stale = book_now.hash.clone();
+        move_chapter(&book_now, &stale, 0, ChapterSpot::After(1)).unwrap();
+        assert!(restore(&book_now, &stale, &[]).is_err(), "nor a stale undo");
+
+        let ending = fs::read_to_string(&book.note.path).unwrap();
+        let outside = |text: &str| {
+            text.replace(
+                section(text, contents::HEADING)
+                    .unwrap()
+                    .join("\n")
+                    .as_str(),
+                "",
+            )
+        };
+        assert_eq!(
+            outside(&ending),
+            outside(&original),
+            "nothing outside the contents changes"
+        );
+    }
 }

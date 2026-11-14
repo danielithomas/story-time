@@ -15,4 +15,4 @@ Story Time keeps a book as scenes, one file each, in the book's scenes folder. C
 
 This scene and the one before it are in a chapter with a title, Getting started. The next scene is a chapter on its own, so it is simply numbered. The headings Writing and Planning divide the book into two parts.
 
-To add a scene, use the plus sign beside Contents in the binder: at the end of the book, at the end of a chapter, or unplaced. To change the order, open the book's overview and move the lines of its contents list.
+To add a scene, use the plus sign beside Contents in the binder: at the end of the book, at the end of a chapter, or unplaced. To change the order, drag scenes and chapters on the Board, or move the lines of the contents list in the book's overview.

@@ -12,8 +12,11 @@ import { api } from "./api";
 import { formatNumber, plural } from "./format";
 import type {
   BibleKind,
+  ChapterRef,
+  ChapterSpot,
   Choices,
   FolderInfo,
+  MoveResult,
   NoteDoc,
   NoteRef,
   ProjectSummary,
@@ -21,6 +24,7 @@ import type {
   PropertyValue,
   SceneRef,
   ScenePlace,
+  SceneSpot,
   TodayInfo,
   VaultInfo,
 } from "./types";
@@ -257,6 +261,7 @@ async function loadProjects() {
  */
 export async function selectProject(slug: string, book: string | null = null, note: string | null = null) {
   if (!(await settle())) return;
+  undoMoves = [];
   try {
     app.slug = slug;
     remember("project", slug);
@@ -413,6 +418,101 @@ async function added(add: () => Promise<{ path: string; name: string; sameName: 
   } catch (error) {
     toastError(error);
   }
+}
+
+// ---- Moving scenes and chapters on the Board ----
+
+/** Moves made on the Board in the open book, newest last, each with the contents as they were before it. */
+let undoMoves: { slug: string; book: string | null; previous: string[]; label: string }[] = [];
+let moveToast = 0;
+
+/** Saves the open note, then reloads the open project's notes, so the Board shows the contents as they are now. */
+export async function refreshTree() {
+  await save();
+  if (!app.slug) return;
+  try {
+    app.tree = await api.projectTree(app.slug, app.book);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Moves a scene in the open book's contents: within its chapter, into another, or in or out of the contents. */
+export async function moveScene(scene: SceneRef, to: SceneSpot) {
+  await moved(
+    scene.title,
+    (slug, book, hash) => api.moveScene(slug, book, hash, scene.path, to),
+    () => {
+      const chapters = app.tree?.book?.parts.flatMap((part) => part.chapters) ?? [];
+      const chapter = chapters.find((c) => c.scenes.some((s) => s.path === scene.path));
+      return chapter ? `Moved ${scene.title} to ${chapter.heading}.` : `${scene.title} is unplaced now.`;
+    },
+  );
+}
+
+/** Moves a chapter of the open book, with its scenes. */
+export async function moveChapter(chapter: ChapterRef, to: ChapterSpot) {
+  await moved(
+    chapter.heading,
+    (slug, book, hash) => api.moveChapter(slug, book, hash, chapter.index, to),
+    () => `Moved ${chapter.heading}.`,
+  );
+}
+
+/**
+ * Runs a move, which rewrites the book note's contents, so edits are saved first. Story Time refuses the move if
+ * the book note changed since the Board showed it (in Obsidian, say), and the Board then catches up.
+ */
+async function moved(
+  label: string,
+  move: (slug: string, book: string | null, hash: string) => Promise<MoveResult | null>,
+  describe: () => string,
+) {
+  const tree = app.tree;
+  if (!app.slug || !tree?.book || !(await settle())) return;
+  const [slug, book] = [app.slug, app.book];
+  try {
+    const result = await move(slug, book, tree.book.hash);
+    await contentsChanged(tree.book.note.path);
+    if (result) {
+      undoMoves.push({ slug, book, previous: result.previous, label });
+      showMoveToast(describe(), true);
+    }
+  } catch (error) {
+    toastError(error);
+    await refreshTree();
+  }
+}
+
+/** Undoes the last move on the Board, putting the book's contents back as they were before it. */
+export async function undoMove() {
+  const last = undoMoves.at(-1);
+  const tree = app.tree;
+  if (!last || !tree?.book || last.slug !== app.slug || last.book !== app.book || !(await settle())) return;
+  try {
+    await api.restoreContents(last.slug, last.book, tree.book.hash, last.previous);
+    undoMoves.pop();
+    await contentsChanged(tree.book.note.path);
+    showMoveToast(`Put ${last.label} back.`, false);
+  } catch (error) {
+    // The book note changed some other way, so none of the earlier moves can be undone safely either.
+    undoMoves = [];
+    toastError(error);
+    await refreshTree();
+  }
+}
+
+/** After the book note's contents were rewritten: shows them, and reloads the note if it is open. */
+async function contentsChanged(bookNote: string) {
+  if (!app.slug) return;
+  app.tree = await api.projectTree(app.slug, app.book);
+  if (app.doc?.path === bookNote && !hasPending()) setDoc(await api.readNote(bookNote));
+}
+
+/** One message about moves at a time: each replaces the last, so its Undo is always for the latest move. */
+function showMoveToast(message: string, undoable: boolean) {
+  dismiss(moveToast);
+  moveToast = toast(message, undoable ? { label: "Undo", run: () => void undoMove() } : undefined);
 }
 
 // ---- Editing and saving ----
@@ -591,6 +691,9 @@ function onKey(event: KeyboardEvent) {
     void toggleFocus();
   } else if (event.key === "Escape" && app.focus && !document.querySelector(".cm-panel")) {
     void toggleFocus(false);
+  } else if (mod && !event.shiftKey && event.key.toLowerCase() === "z" && app.view === "board" && !isTextField(event.target)) {
+    event.preventDefault();
+    void undoMove();
   } else if (mod && event.key === ",") {
     event.preventDefault();
     app.view = "settings";
@@ -603,12 +706,17 @@ function onKey(event: KeyboardEvent) {
   }
 }
 
+function isTextField(target: EventTarget | null) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
+}
+
 let nextToast = 1;
 
-export function toast(message: string, action?: Toast["action"], tone: Toast["tone"] = "info") {
+export function toast(message: string, action?: Toast["action"], tone: Toast["tone"] = "info"): number {
   const id = nextToast++;
   app.toasts.push({ id, message, tone, action });
   setTimeout(() => dismiss(id), action || tone === "error" ? 10000 : 5000);
+  return id;
 }
 
 export function toastError(error: unknown) {
