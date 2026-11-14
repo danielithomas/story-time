@@ -99,8 +99,9 @@ export const api = {
   /** Moves a note to the system trash, and returns its name. */
   deleteNote: (path: string) => invoke<string>("delete_note", { path }),
   cutScene: (path: string) => invoke<RelocatedNote>("cut_scene", { path }),
-  putBackScene: (path: string, slug: string, book: string | null) =>
-    invoke<RelocatedNote>("put_back_scene", { path, slug, book }),
+  /** Moves a scrap into a book as an unplaced scene: a cut scene as it was, any other under `name` or its own. */
+  useScrap: (path: string, slug: string, book: string | null, name: string | null) =>
+    invoke<RelocatedNote>("use_scrap", { path, slug, book, name }),
   addScrap: (slug: string | null) => invoke<AddedNote>("add_scrap", { slug }),
   addResearch: (slug: string | null, name: string) => invoke<AddedNote>("add_research", { slug, name }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),

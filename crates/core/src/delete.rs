@@ -6,8 +6,8 @@
 //! were and lead nowhere until it's restored, as `check` reports; `links_to` counts them first.
 //!
 //! Cutting moves a scene to its world's scratchpad and out of its book's contents, keeping its
-//! properties, so it can go back into a book unchanged: `put_back` moves it into a book as an
-//! unplaced scene. Links to it, and its own links, are rewritten where they would no longer reach
+//! properties, so it can go back into a book unchanged: `use_scrap` moves it, or any scrap, into a
+//! book as an unplaced scene. Links to it, and its own links, are rewritten where they would no longer reach
 //! the same notes.
 
 use std::fs;
@@ -18,8 +18,14 @@ use anyhow::{Context, Result, bail};
 use crate::contents::{self, Spot};
 use crate::home::Home;
 use crate::links::{self, LinkIndex, Moves, Resolution};
-use crate::note::{Note, Saved, content_hash, save_section, section, split_frontmatter};
+use crate::note::{
+    Note, PropertyValue, Saved, content_hash, save_section, section, set_properties,
+    split_frontmatter, write_atomically,
+};
 use crate::project::{BOOKS_HEADING, Book, Project};
+use crate::rename;
+use crate::scaffold::project_stems;
+use crate::text::unique_slug;
 use crate::vault::{Vault, markdown_files};
 
 /// Links to the note at `path` from other notes: how many, and in how many notes.
@@ -141,45 +147,79 @@ pub fn cut(vault: &Vault, path: &Path) -> Result<Relocated> {
     relocate(vault, path, &to)
 }
 
-/// Puts a scene that was cut to its world's scratchpad back into `book`, one of that world's
-/// books, as an unplaced scene. Refused for any other scrap, and if `book` already has a scene by
-/// that name, or another note in the world has its file name.
-pub fn put_back(vault: &Vault, path: &Path, book: &Book) -> Result<Relocated> {
+/// Uses a scrap in `book`, moving it into the book as an unplaced scene. A scene that was cut goes
+/// back as it was, keeping its name and file name. Any other scrap becomes a scene called `name`,
+/// or its own name if it has one, filed under that name's slug: its properties gain `type: scene`
+/// and the name, and its text stays exactly as it is. A scrap in a world's scratchpad can only go
+/// into that world's books; one in the bookshelf's scratchpad, into any. Refused if `book`
+/// already has a scene by that name.
+pub fn use_scrap(vault: &Vault, path: &Path, book: &Book, name: Option<&str>) -> Result<Relocated> {
     let note = Note::load(path)?;
-    let is_cut_scene = note.frontmatter.str("type").as_deref() == Some("scene");
-    let project = match Home::of(vault, path)? {
-        Some(Home::Scrap {
-            project: Some(project),
-            ..
-        }) if is_cut_scene => project,
-        _ => bail!(
-            "only a scene cut to a world's scratchpad can be put back into a book; {} isn't one",
+    let Some(Home::Scrap { project }) = Home::of(vault, path)? else {
+        bail!(
+            "only a scrap can be used in a book; {} isn't one",
             vault.relative(path).display()
-        ),
+        );
     };
-    if book.project != project.slug {
-        bail!("{} isn't one of {}'s books", book.title(), project.title());
+    let world = vault
+        .projects()?
+        .into_iter()
+        .find(|project| project.slug == book.project)
+        .context("the book's world")?;
+    if let Some(project) = &project
+        && project.slug != world.slug
+    {
+        bail!(
+            "{} is in {}'s scratchpad, so it can only go into one of that world's books",
+            note.title(),
+            project.title()
+        );
     }
-    let name = note.title();
+    let was_scene = note.frontmatter.str("type").as_deref() == Some("scene");
+    let Some(given) = name.map(str::to_string).or_else(|| note.given_name()) else {
+        bail!("give the scrap a name to use it as a scene");
+    };
+    let (name, slug) = rename::new_name(Some(&given), &given)?;
     if book
         .scenes()?
         .iter()
         .any(|scene| scene.title().eq_ignore_ascii_case(&name))
     {
         bail!(
-            "{} already has a scene called {name}: rename one of them, then put it back",
+            "{} already has a scene called {name}: choose another name",
             book.title()
         );
     }
-    if let Some(other) = same_name_in(&project, Some(book), path)? {
-        bail!(
-            "{} already has a note called {}, at {}: rename the scene, then put it back",
-            project.title(),
-            stem(path),
-            vault.relative(&other).display()
+    let own = stem(path).to_lowercase();
+    let mut taken = project_stems(&world, Some(book))?;
+    taken.remove(&own);
+    let unchanged = was_scene && name == note.title();
+    let slug = if unchanged {
+        if taken.contains(&own) {
+            bail!(
+                "{} already has a note called {own}: rename the scene, then put it back",
+                world.title()
+            );
+        }
+        own
+    } else {
+        unique_slug(&slug, |candidate| taken.contains(candidate))
+    };
+    if !unchanged {
+        let content =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let mut aliases = vec![name.clone()];
+        aliases.extend(note.aliases().into_iter().filter(|alias| *alias != name));
+        let content = set_properties(
+            &content,
+            &[
+                ("type", PropertyValue::Text("scene".to_string())),
+                ("aliases", PropertyValue::List(aliases)),
+            ],
         );
+        write_atomically(path, &content)?;
     }
-    relocate(vault, path, &book.scenes_dir().join(file_name(path)?))
+    relocate(vault, path, &book.scenes_dir().join(format!("{slug}.md")))
 }
 
 /// Another note in `project` with the same file name as `path`, leaving out the scenes of books
@@ -525,7 +565,7 @@ mod tests {
         );
         assert!(morning.exists());
 
-        let back = put_back(&vault, &in_scratchpad, &reload(&two)).unwrap();
+        let back = use_scrap(&vault, &in_scratchpad, &reload(&two), None).unwrap();
         assert_eq!(back.path, two.scenes_dir().join("arrival.md"));
         let contents = reload(&two).contents().unwrap();
         let unplaced: Vec<String> = contents.unplaced.iter().map(|s| s.title()).collect();
@@ -546,13 +586,13 @@ mod tests {
         .unwrap()
         .path;
         assert!(
-            put_back(&vault, &scrap, &reload(&one)).is_err(),
-            "only a cut scene goes back"
+            use_scrap(&vault, &scrap, &reload(&one), None).is_err(),
+            "a captured scrap needs a name to become a scene"
         );
         let again = cut(&vault, &back.path).unwrap();
         let (_, elsewhere) = project_named(&vault, "Third Story");
         assert!(
-            put_back(&vault, &again.path, &elsewhere).is_err(),
+            use_scrap(&vault, &again.path, &elsewhere, None).is_err(),
             "only into its own world"
         );
     }
@@ -707,6 +747,64 @@ mod tests {
         assert!(!project.dir.exists() && trash.join(project.dir.file_name().unwrap()).is_dir());
         assert!(one.dir.starts_with(&project.dir));
         assert!(vault.projects().unwrap().is_empty());
+    }
+
+    #[test]
+    fn uses_a_scrap_as_a_scene_keeping_its_text() {
+        let (_dir, vault) = vault();
+        let (project, book) = project(&vault, "Sample Story");
+        scene(&vault, &project, &book, "Arrival");
+        let now = today().and_hms_opt(21, 9, 0).unwrap();
+        let text = "A line overheard on the ferry.\n  Kept exactly, spacing and all.";
+        let captured = add_scrap(&vault, Some(&project), text, Some("dictation"), now)
+            .unwrap()
+            .path;
+        let body = Note::load(&captured).unwrap().body;
+
+        let refused = use_scrap(&vault, &captured, &reload(&book), None).unwrap_err();
+        assert!(
+            refused.to_string().contains("give the scrap a name"),
+            "{refused}"
+        );
+        let clash = use_scrap(&vault, &captured, &reload(&book), Some("arrival")).unwrap_err();
+        assert!(
+            clash
+                .to_string()
+                .contains("already has a scene called arrival"),
+            "{clash}"
+        );
+
+        let used = use_scrap(&vault, &captured, &reload(&book), Some("The Ferry")).unwrap();
+        assert_eq!(used.path, book.scenes_dir().join("the-ferry.md"));
+        let note = Note::load(&used.path).unwrap();
+        assert_eq!(note.frontmatter.str("type").as_deref(), Some("scene"));
+        assert_eq!(note.aliases(), ["The Ferry"]);
+        assert_eq!(
+            note.frontmatter.str("source").as_deref(),
+            Some("dictation"),
+            "it keeps its properties"
+        );
+        assert_eq!(note.body, body, "and its text, exactly");
+        let unplaced: Vec<String> = reload(&book)
+            .contents()
+            .unwrap()
+            .unplaced
+            .iter()
+            .map(|s| s.title())
+            .collect();
+        assert_eq!(unplaced, ["The Ferry"]);
+
+        // A fragment in the bookshelf's scratchpad can go into any world's book, under its own name.
+        let loose = add_scrap(&vault, None, "Somewhere else entirely.", None, now)
+            .unwrap()
+            .path;
+        let named = fs::read_to_string(&loose)
+            .unwrap()
+            .replace("type: scrap\n", "type: scrap\naliases: [Elsewhere]\n");
+        fs::write(&loose, named).unwrap();
+        let moved = use_scrap(&vault, &loose, &reload(&book), None).unwrap();
+        assert_eq!(moved.path, book.scenes_dir().join("elsewhere.md"));
+        assert!(!loose.exists());
     }
 
     fn project_named(vault: &Vault, title: &str) -> (Project, Book) {

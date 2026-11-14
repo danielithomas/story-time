@@ -1,6 +1,6 @@
 <script lang="ts">
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
-  import { app, cutScene, linkFrom, putBackScene, renameNote, setProperty, toastError } from "../lib/store.svelte";
+  import { app, bookScenes, cutScene, linkFrom, renameNote, setProperty, toastError, useScrap } from "../lib/store.svelte";
   import type { NoteRef } from "../lib/types";
   import DeleteFolder from "./DeleteFolder.svelte";
   import DeleteNote from "./DeleteNote.svelte";
@@ -68,10 +68,49 @@
   /** Deleting the open book or world, from its own note. */
   let deletingFolder = $state<"book" | "project" | null>(null);
 
-  /** A scene cut to this world's scratchpad, which can go back into the open book. */
-  const canPutBack = $derived(
-    doc?.kind === "scrap" && doc.properties.type === "scene" && doc.project === app.slug && !!app.tree?.book,
+  /** A scrap that can be used in the open book: one from this world's scratchpad, or the bookshelf's. */
+  const canUse = $derived(
+    doc?.kind === "scrap" && !!app.tree?.book && (doc.project === app.slug || doc.project === null),
   );
+  /** A scene that was cut, which goes back into a book as it was. */
+  const isCutScene = $derived(doc?.properties.type === "scene");
+  /** The name for a scrap about to become a scene, while it's being asked for. */
+  let sceneName = $state<string | null>(null);
+
+  // Moving to another note closes the form.
+  $effect(() => {
+    void doc?.path;
+    sceneName = null;
+  });
+
+  function askSceneName() {
+    const aliases = doc?.properties.aliases;
+    sceneName = (Array.isArray(aliases) ? aliases[0] : aliases) ?? "";
+  }
+
+  async function useAsScene(event: SubmitEvent) {
+    event.preventDefault();
+    const name = sceneName?.trim();
+    if (!doc || !name) return;
+    sceneName = null;
+    await useScrap(doc.path, name);
+  }
+
+  /** Records that the scrap led to a scene, with a link to it in `used`. */
+  async function markUsed(select: HTMLSelectElement) {
+    const scene = bookScenes(app.tree).find((s) => s.path === select.value);
+    select.value = "";
+    const from = doc?.path;
+    if (!scene || !from) return;
+    try {
+      const link = await linkFrom(from, scene.path);
+      const used = doc?.properties.used;
+      const list = Array.isArray(used) ? used : used ? [used] : [];
+      if (app.doc?.path === from && !list.includes(link)) setProperty("used", [...list, link]);
+    } catch (error) {
+      toastError(error);
+    }
+  }
 
   /** The note's other names: its aliases after the first, which is its name. */
   const otherNames = $derived.by(() => {
@@ -301,6 +340,17 @@
       <p class="hint">
         A fragment kept until it's useful. Its words count toward your daily goal, but not toward any book.
       </p>
+      {#if canUse && !isCutScene && app.tree?.book}
+        <label class="field">
+          <span>Led to a scene</span>
+          <select onchange={(e) => markUsed(e.currentTarget)}>
+            <option value="">Choose a scene in {app.tree.book.summary.title}…</option>
+            {#each bookScenes(app.tree) as scene (scene.path)}
+              <option value={scene.path}>{scene.title}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
     {:else if doc.kind === "flow"}
       <p class="muted">Laid out as <strong>{structureName}</strong>.</p>
       <p class="hint">
@@ -314,11 +364,27 @@
         {#if doc.kind === "scene"}
           <button class="btn" onclick={() => cutScene(doc.path)}>Cut to the scratchpad</button>
         {/if}
-        {#if canPutBack}
-          <button class="btn" onclick={() => putBackScene(doc.path)}>Put back into {app.tree?.book?.summary.title}</button>
+        {#if canUse && isCutScene}
+          <button class="btn" onclick={() => useScrap(doc.path, null)}>Put back into {app.tree?.book?.summary.title}</button>
+        {:else if canUse && sceneName === null}
+          <button class="btn" onclick={askSceneName}>Use as a scene in {app.tree?.book?.summary.title}…</button>
         {/if}
         <button class="btn danger" onclick={() => (deleting = true)}>Delete…</button>
       </div>
+      {#if canUse && sceneName !== null}
+        <form class="scene-name" onsubmit={useAsScene}>
+          <label class="field">
+            <span>Its name as a scene</span>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input bind:value={sceneName} placeholder="Scene name" autofocus />
+          </label>
+          <p class="hint">It moves into {app.tree?.book?.summary.title} as an unplaced scene; its text stays as it is.</p>
+          <div class="note-actions">
+            <button type="submit" class="btn primary" disabled={!sceneName?.trim()}>Use as a scene</button>
+            <button type="button" class="btn" onclick={() => (sceneName = null)}>Cancel</button>
+          </div>
+        </form>
+      {/if}
     {/if}
 
     {#if (doc.kind === "book" && doc.book === app.book) || (doc.kind === "project" && doc.project === app.slug)}

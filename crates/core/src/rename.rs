@@ -244,7 +244,7 @@ fn with_heading(content: &str, old: &str, new: &str) -> String {
 
 /// A new name with its spacing tidied, or with `None` the note's own, and its slug. Refuses a name
 /// with no letters or numbers, and one that would break links to the note.
-fn new_name(name: Option<&str>, current: &str) -> Result<(String, String)> {
+pub(crate) fn new_name(name: Option<&str>, current: &str) -> Result<(String, String)> {
     let name = name
         .map(|name| name.split_whitespace().collect::<Vec<_>>().join(" "))
         .unwrap_or_else(|| current.to_string());

@@ -546,13 +546,16 @@ export async function cutScene(path: string) {
   });
 }
 
-/** Puts a scene that was cut back into the open book, as an unplaced scene. It stays open. */
-export async function putBackScene(path: string) {
+/**
+ * Uses a scrap in the open book, as an unplaced scene: a cut scene goes back as it was, and any other scrap becomes a
+ * scene called `name` (or its own name), its text unchanged. It stays open.
+ */
+export async function useScrap(path: string, name: string | null) {
   if (!app.slug) return;
   const [slug, book] = [app.slug, app.book];
-  await relocated(path, () => api.putBackScene(path, slug, book), (moved) => {
+  await relocated(path, () => api.useScrap(path, slug, book, name), (moved) => {
     const title = app.tree?.book?.summary.title ?? "the book";
-    return `Put ${moved.name} back into ${title}, unplaced. Drag it into a chapter on the Board.`;
+    return `${moved.name} is a scene in ${title} now, unplaced. Drag it into a chapter on the Board.`;
   });
 }
 

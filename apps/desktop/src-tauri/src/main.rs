@@ -54,7 +54,7 @@ fn main() {
             commands::delete_book,
             commands::delete_project,
             commands::cut_scene,
-            commands::put_back_scene,
+            commands::use_scrap,
             commands::add_scrap,
             commands::add_research,
             commands::link_for,

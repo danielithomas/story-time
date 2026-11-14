@@ -1319,19 +1319,20 @@ pub async fn cut_scene(path: String, state: State<'_, AppState>) -> CmdResult<Re
     Ok(relocated(delete::cut(&vault, &path).or_message()?))
 }
 
-/// Puts a scene that was cut back into one of its world's books, as an unplaced scene.
+/// Uses a scrap in a book, as an unplaced scene: a cut scene goes back as it was, and any other
+/// scrap becomes a scene called `name` (or its own name), keeping its text exactly.
 #[tauri::command]
-pub async fn put_back_scene(
+pub async fn use_scrap(
     path: String,
     slug: String,
     book: Option<String>,
+    name: Option<String>,
     state: State<'_, AppState>,
 ) -> CmdResult<RelocatedNote> {
     let (vault, _, book) = state.book(&slug, book.as_deref())?;
     let path = note_path(&vault, &path)?;
-    Ok(relocated(
-        delete::put_back(&vault, &path, &book).or_message()?,
-    ))
+    let used = delete::use_scrap(&vault, &path, &book, name.as_deref()).or_message()?;
+    Ok(relocated(used))
 }
 
 /// The project with this slug, or `None` for the vault itself.
