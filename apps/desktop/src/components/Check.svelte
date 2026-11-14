@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { addNote, allNotes, app, openNote, renameNote, toastError } from "../lib/store.svelte";
+  import { addNote, addOtherName, allNotes, app, openNote, renameNote, toastError } from "../lib/store.svelte";
   import type { BibleKind, CheckReport } from "../lib/types";
 
   let report = $state<CheckReport | null>(null);
@@ -29,6 +29,12 @@
     await run();
   }
 
+  /** Makes a flagged spelling one of the note's other names, so it's no longer flagged. */
+  async function accept(note: string, word: string) {
+    await addOtherName(note, word);
+    await run();
+  }
+
   /** Gives a note's file the name it should have, updating every link to it. */
   async function fixName(path: string) {
     if (await renameNote(path, null)) await run();
@@ -42,6 +48,7 @@
       !report.brokenEntries.length &&
       !report.repeated.length &&
       !report.notOnPage.length &&
+      !report.nearMisses.length &&
       !report.misnamed.length &&
       !report.drifted.length &&
       !report.withoutStatus.length &&
@@ -131,6 +138,34 @@
         <ul>
           {#each report.notOnPage as item (item.name)}
             <li><span class="kind">{item.kind}</span> {@render links([item.name])}</li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if report.nearMisses.length}
+      <section>
+        <h2>Spellings close to a world-bible name</h2>
+        <p class="muted">
+          Typos in invented names slip past a spellchecker. Fix them in the scene; if a spelling is meant, such as a
+          nickname, add it to the note's other names.
+        </p>
+        <ul>
+          {#each report.nearMisses as item (item.word + item.term)}
+            <li>
+              <strong>{item.word}</strong>
+              <span class="muted">
+                {item.caseOnly ? "capitalised unlike" : "close to"}
+                <button class="link" onclick={() => openNote(item.note)}>{item.term}</button>{item.term === item.name
+                  ? ""
+                  : ` (${item.name})`} · in {@render links(item.scenes)}
+              </span>
+              {#if !item.caseOnly}
+                <span class="actions">
+                  <button class="btn" onclick={() => accept(item.note, item.word)}>Add to {item.name}'s other names</button>
+                </span>
+              {/if}
+            </li>
           {/each}
         </ul>
       </section>

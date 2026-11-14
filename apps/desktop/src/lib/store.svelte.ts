@@ -465,6 +465,26 @@ export async function renameNote(path: string, name: string | null): Promise<boo
 }
 
 /**
+ * Adds `name` to a note's other names (its aliases after the first), as when a spelling Check flagged is meant. Its
+ * name stays first. Nothing is written if the note changed on disk since it was read.
+ */
+export async function addOtherName(path: string, name: string) {
+  if (!(await settle())) return;
+  try {
+    const doc = await api.readNote(path);
+    const value = doc.properties.aliases;
+    const aliases = Array.isArray(value) ? value : value ? [value] : [];
+    const list = aliases.length ? [...aliases, name] : [doc.title, name];
+    const saved = await api.saveNote({ path, properties: { aliases: list }, baseHash: doc.hash, force: false });
+    if (saved.conflict) throw new Error(`${doc.title} changed on disk just now. Try again.`);
+    if (app.doc?.path === path && !hasPending()) setDoc(await api.readNote(path));
+    toast(`Added ${name} to ${doc.title}'s other names.`);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/**
  * Deletes a scene, world-bible note, research or scrap by moving it to the system trash, where it can be restored. A
  * scene comes out of its book's contents first. If it was open, its book (or world) opens instead.
  */

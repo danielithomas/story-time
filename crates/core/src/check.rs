@@ -13,6 +13,7 @@ use crate::links::{LinkIndex, Resolution, links};
 use crate::note::{Note, PropertyValue, section};
 use crate::project::{BOOKS_HEADING, NoteKind, Project};
 use crate::scratchpad;
+use crate::spelling::{self, BibleName, NearMiss};
 use crate::text::{contains_word, is_slug, slug_matches, slugify};
 use crate::vault::Vault;
 use crate::words::prose;
@@ -41,6 +42,8 @@ pub struct Report {
     /// Bible notes whose name, title and aliases appear in no scene. Only checked once the scenes
     /// have words in them.
     pub not_on_page: Vec<(NoteKind, String)>,
+    /// Words in the scenes a typo or a capital away from a world-bible name.
+    pub near_misses: Vec<NearMiss>,
     /// Files and folders whose names aren't kebab-case, with the name each should have.
     pub misnamed: Vec<(PathBuf, String)>,
     /// Notes whose file name no longer matches the name in their properties, with the file name
@@ -60,6 +63,7 @@ impl Report {
             && self.broken_entries.is_empty()
             && self.repeated.is_empty()
             && self.not_on_page.is_empty()
+            && self.near_misses.is_empty()
             && self.misnamed.is_empty()
             && self.drifted.is_empty()
             && self.without_status.is_empty()
@@ -188,6 +192,30 @@ pub fn check(vault: &Vault, project: &Project) -> Result<Report> {
             }
         }
     }
+
+    let prose_by_scene: Vec<(String, String)> = scenes
+        .iter()
+        .map(|scene| (scene.note.name.clone(), prose(&scene.note.body)))
+        .collect();
+    let names: Vec<BibleName> = bible
+        .iter()
+        .flat_map(|(_, note)| {
+            let title = note.title();
+            std::iter::once(title.clone())
+                .chain(note.aliases())
+                .map(move |name| BibleName {
+                    note: note.path.clone(),
+                    title: title.clone(),
+                    name,
+                })
+        })
+        .collect();
+    let known: Vec<String> = std::iter::once(project.title())
+        .chain(books.iter().map(|book| book.title()))
+        .chain(scenes.iter().map(|scene| scene.title()))
+        .chain(research.iter().map(Note::title))
+        .collect();
+    report.near_misses = spelling::near_misses(&prose_by_scene, &names, &known);
 
     report.misnamed = misnamed(&project.dir)?;
     let all_notes = scenes
@@ -402,6 +430,44 @@ mod tests {
             report.not_on_page.is_empty(),
             "a POV character is on the page"
         );
+    }
+
+    #[test]
+    fn flags_near_miss_spellings_of_bible_names() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(".obsidian")).unwrap();
+        let vault = Vault::open(dir.path()).unwrap();
+        let (project, book) = create_project(&vault, &spec("Sample Story"), today()).unwrap();
+        let mara = add_note(
+            &vault,
+            &project,
+            NoteKind::Character,
+            "Mara Okafor",
+            today(),
+        )
+        .unwrap()
+        .path;
+        let arrival = scene(&vault, &project, &book, "Arrival");
+        let text = fs::read_to_string(&arrival).unwrap()
+            + "\nMarra Okafor came ashore, and Marra slept.\n";
+        fs::write(&arrival, text).unwrap();
+        let report = check(&vault, &project).unwrap();
+        assert_eq!(report.near_misses.len(), 1, "{:?}", report.near_misses);
+        let miss = &report.near_misses[0];
+        assert_eq!(
+            (miss.word.as_str(), miss.term.as_str(), miss.name.as_str()),
+            ("Marra", "Mara", "Mara Okafor")
+        );
+        assert_eq!((miss.note.clone(), miss.case_only), (mara.clone(), false));
+        assert_eq!(miss.scenes.iter().collect::<Vec<_>>(), ["arrival"]);
+        assert!(!report.is_clean());
+
+        // A variant that's meant stops being flagged once it's one of the note's other names.
+        let note = fs::read_to_string(&mara)
+            .unwrap()
+            .replace("  - \"Mara Okafor\"", "  - \"Mara Okafor\"\n  - Marra");
+        fs::write(&mara, note).unwrap();
+        assert!(check(&vault, &project).unwrap().near_misses.is_empty());
     }
 
     #[test]

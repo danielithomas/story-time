@@ -15,7 +15,7 @@ A bible holds the facts the story must stay consistent with. Keep it lean: it se
 - **Characters.** The useful split is *want* (the external goal they chase) versus *need* (the internal truth they must accept), plus what they fear. Voice, meaning how someone talks, is what readers notice when it slips.
 - **Places.** Sensory detail (sight, sound, smell, touch, taste) makes a place feel real. Many writers treat an important place as almost a character.
 - **World.** Brandon Sanderson's *Second Law*: limitations are more interesting than powers. For science fiction this is the core of a world note. What does the technology or the magic *cost*, and what can it *not* do?
-- **Style sheet.** Copy editors keep a sheet of spellings, capitalisation and invented terms: is it *jump drive* or *Jump Drive*, *Mara* or *Marra*? Science fiction invents a lot of vocabulary, so this pays off quickly. It isn't in the scaffold yet; a `bible/world/style-sheet.md` per project would be a natural home.
+- **Style sheet.** Copy editors keep a sheet of spellings, capitalisation and invented terms: is it *jump drive* or *Jump Drive*, *Mara* or *Marra*? Science fiction invents a lot of vocabulary, so this pays off quickly. In story-time the world bible is the sheet: each note's name and aliases are the spellings, and `check` flags words in the scenes a typo or a capital away from them (*Marra* for *Mara*, *Mckay* for *McKay*). A variant that's meant, such as a nickname, goes in the note's aliases.
 - **Chronology.** The order events *happen* in the world often differs from the order they are *told*. A book's contents and flow hold the telling order; the world's timeline note, and each scene's `when`, hold the order things happened in.
 
 **story-time:** templates for each kind of note prompt for these (how characters look, speak and what drives them; how a place feels; how the world works). `aliases` record nicknames. `check` reports both directions of drift: names linked in the story with no bible note yet, and bible notes that never reach the page.
@@ -74,8 +74,7 @@ The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop a
 Ordered roughly by value for effort:
 
 1. **Desktop app, next steps.** Test the Windows and macOS installers (#13).
-2. **Style-sheet check.** Flag near-miss spellings of bible names and terms (*Marra* for *Mara*) using edit distance.
-3. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
-4. **Standard manuscript format.** A pandoc reference document so `compile --format docx` produces William Shunn's submission format (12-point serif, double-spaced, header with surname / title / page).
-5. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
-6. **`--json` output** for integrations: Obsidian's Shell Commands plugin, n8n, or a web dashboard.
+2. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
+3. **Standard manuscript format.** A pandoc reference document so `compile --format docx` produces William Shunn's submission format (12-point serif, double-spaced, header with surname / title / page).
+4. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
+5. **`--json` output** for integrations: Obsidian's Shell Commands plugin, n8n, or a web dashboard.

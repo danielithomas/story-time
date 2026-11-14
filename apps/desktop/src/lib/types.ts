@@ -257,6 +257,8 @@ export interface CheckReport {
   repeated: string[];
   notOnPage: { kind: string; name: string }[];
   /** Each with the note's full path when Story Time can rename it. */
+  /** Words in the scenes a typo or a capital away from a world-bible name, with the note it belongs to. */
+  nearMisses: { word: string; term: string; note: string; name: string; caseOnly: boolean; scenes: string[] }[];
   misnamed: { path: string; to: string; note: string | null }[];
   drifted: { path: string; to: string; note: string | null }[];
   withoutStatus: string[];

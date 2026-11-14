@@ -26,6 +26,7 @@ pub mod project;
 pub mod rename;
 pub mod scaffold;
 pub mod scratchpad;
+pub mod spelling;
 pub mod structures;
 pub mod templates;
 pub mod text;

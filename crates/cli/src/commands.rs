@@ -737,6 +737,29 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         table.print(4);
         println!();
     }
+    if !report.near_misses.is_empty() {
+        println!("  Spellings close to a world-bible name (typos?):");
+        let mut table = Table::new(&[
+            ("Word", Align::Left),
+            ("Close to", Align::Left),
+            ("In", Align::Left),
+        ]);
+        for miss in &report.near_misses {
+            let close = if miss.case_only {
+                format!("{} (capitals differ)", miss.term)
+            } else if miss.term == miss.name {
+                miss.term.clone()
+            } else {
+                format!("{} ({})", miss.term, miss.name)
+            };
+            let scenes = miss.scenes.iter().cloned().collect::<Vec<_>>().join(", ");
+            table.row(vec![miss.word.clone(), close, scenes]);
+        }
+        table.print(4);
+        println!(
+            "    A spelling that's meant stops being flagged once it's one of the note's aliases.\n"
+        );
+    }
     for (heading, renames) in [
         ("Names that aren't kebab-case:", &report.misnamed),
         (

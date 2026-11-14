@@ -1567,6 +1567,20 @@ pub struct BibleNote {
     name: String,
 }
 
+/// A word in the scenes a typo or a capital away from a world-bible name.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearMissRef {
+    word: String,
+    /// The word of the name it is close to, the note's full path and its name.
+    term: String,
+    note: String,
+    name: String,
+    case_only: bool,
+    /// The scenes it appears in, by file name.
+    scenes: Vec<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Unreadable {
@@ -1593,6 +1607,7 @@ pub struct CheckReport {
     broken_entries: Vec<Mention>,
     repeated: Vec<String>,
     not_on_page: Vec<BibleNote>,
+    near_misses: Vec<NearMissRef>,
     misnamed: Vec<Rename>,
     drifted: Vec<Rename>,
     without_status: Vec<String>,
@@ -1638,6 +1653,18 @@ pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResul
             .map(|(kind, name)| BibleNote {
                 kind: kind.key().to_string(),
                 name,
+            })
+            .collect(),
+        near_misses: report
+            .near_misses
+            .into_iter()
+            .map(|miss| NearMissRef {
+                word: miss.word,
+                term: miss.term,
+                note: miss.note.display().to_string(),
+                name: miss.name,
+                case_only: miss.case_only,
+                scenes: miss.scenes.into_iter().collect(),
             })
             .collect(),
         without_status: report.without_status,

@@ -145,6 +145,33 @@ pub fn yaml_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// How many single-character edits turn `a` into `b`: insertions, deletions, substitutions and
+/// swaps of two neighbours (the optimal string alignment distance).
+pub fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut rows = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in rows[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut best = (rows[i - 1][j] + 1)
+                .min(rows[i][j - 1] + 1)
+                .min(rows[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                best = best.min(rows[i - 2][j - 2] + 1);
+            }
+            rows[i][j] = best;
+        }
+    }
+    rows[a.len()][b.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +264,16 @@ mod tests {
         assert!(!contains_word("Marana", "Mara"));
         assert!(contains_word("the Old Port at dusk", "Old Port"));
         assert!(!contains_word("anything", ""));
+    }
+
+    #[test]
+    fn counts_edits_between_words() {
+        assert_eq!(edit_distance("mara", "mara"), 0);
+        assert_eq!(edit_distance("marra", "mara"), 1);
+        assert_eq!(edit_distance("mraa", "mara"), 1, "a swap is one edit");
+        assert_eq!(edit_distance("okafur", "okafor"), 1);
+        assert_eq!(edit_distance("kthar", "k'thar"), 1);
+        assert_eq!(edit_distance("make", "mara"), 2);
+        assert_eq!(edit_distance("", "abc"), 3);
     }
 }
