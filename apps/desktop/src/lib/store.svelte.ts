@@ -16,7 +16,6 @@ import type {
   ChapterSpot,
   Choices,
   FolderInfo,
-  MoveResult,
   NoteDoc,
   NoteRef,
   ProjectSummary,
@@ -261,7 +260,8 @@ async function loadProjects() {
  */
 export async function selectProject(slug: string, book: string | null = null, note: string | null = null) {
   if (!(await settle())) return;
-  undoMoves = [];
+  // The message's Undo is for the book open now.
+  dismiss(moveToast);
   try {
     app.slug = slug;
     remember("project", slug);
@@ -422,8 +422,7 @@ async function added(add: () => Promise<{ path: string; name: string; sameName: 
 
 // ---- Moving scenes and chapters on the Board ----
 
-/** Moves made on the Board in the open book, newest last, each with the contents as they were before it. */
-let undoMoves: { slug: string; book: string | null; previous: string[]; label: string }[] = [];
+/** The message about the latest move, which offers to undo it. */
 let moveToast = 0;
 
 /** Saves the open note, then reloads the open project's notes, so the Board shows the contents as they are now. */
@@ -440,7 +439,6 @@ export async function refreshTree() {
 /** Moves a scene in the open book's contents: within its chapter, into another, or in or out of the contents. */
 export async function moveScene(scene: SceneRef, to: SceneSpot) {
   await moved(
-    scene.title,
     (slug, book, hash) => api.moveScene(slug, book, hash, scene.path, to),
     () => {
       const chapters = app.tree?.book?.parts.flatMap((part) => part.chapters) ?? [];
@@ -453,7 +451,6 @@ export async function moveScene(scene: SceneRef, to: SceneSpot) {
 /** Moves a chapter of the open book, with its scenes. */
 export async function moveChapter(chapter: ChapterRef, to: ChapterSpot) {
   await moved(
-    chapter.heading,
     (slug, book, hash) => api.moveChapter(slug, book, hash, chapter.index, to),
     () => `Moved ${chapter.heading}.`,
   );
@@ -461,42 +458,43 @@ export async function moveChapter(chapter: ChapterRef, to: ChapterSpot) {
 
 /**
  * Runs a move, which rewrites the book note's contents, so edits are saved first. Story Time refuses the move if
- * the book note changed since the Board showed it (in Obsidian, say), and the Board then catches up.
+ * the book note changed since the Board showed it (through a sync service, say), and the Board then catches up.
  */
 async function moved(
-  label: string,
-  move: (slug: string, book: string | null, hash: string) => Promise<MoveResult | null>,
+  move: (slug: string, book: string | null, hash: string) => Promise<boolean>,
   describe: () => string,
 ) {
   const tree = app.tree;
   if (!app.slug || !tree?.book || !(await settle())) return;
   const [slug, book] = [app.slug, app.book];
   try {
-    const result = await move(slug, book, tree.book.hash);
+    const done = await move(slug, book, tree.book.hash);
     await contentsChanged(tree.book.note.path);
-    if (result) {
-      undoMoves.push({ slug, book, previous: result.previous, label });
-      showMoveToast(describe(), true);
-    }
+    if (done) showMoveToast(describe(), true);
   } catch (error) {
     toastError(error);
     await refreshTree();
   }
 }
 
-/** Undoes the last move on the Board, putting the book's contents back as they were before it. */
+/**
+ * Undoes the open book's latest move on the Board, putting its contents back as they were before it. Each book's
+ * moves are kept on this computer, in Story Time's data folder, so they can be undone after switching books or
+ * reopening the app. Story Time refuses if the book note has changed since it last left it, and then forgets them.
+ */
 export async function undoMove() {
-  const last = undoMoves.at(-1);
   const tree = app.tree;
-  if (!last || !tree?.book || last.slug !== app.slug || last.book !== app.book || !(await settle())) return;
+  if (!app.slug || !tree?.book || !(await settle())) return;
   try {
-    await api.restoreContents(last.slug, last.book, tree.book.hash, last.previous);
-    undoMoves.pop();
+    const what = await api.undoMove(app.slug, app.book);
+    if (what === null) {
+      showMoveToast("There's no move to undo in this book.", false);
+      return;
+    }
     await contentsChanged(tree.book.note.path);
-    showMoveToast(`Put ${last.label} back.`, false);
+    showMoveToast(`Put ${what} back.`, false);
   } catch (error) {
-    // The book note changed some other way, so none of the earlier moves can be undone safely either.
-    undoMoves = [];
+    dismiss(moveToast);
     toastError(error);
     await refreshTree();
   }

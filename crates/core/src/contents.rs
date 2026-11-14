@@ -607,6 +607,8 @@ fn is_loose(lines: &[&str], listing: &Listing) -> bool {
 /// A change to a book's contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Moved {
+    /// What moved: a scene's name, or a chapter's heading as it was.
+    pub what: String,
     /// The book note's content hash after the change.
     pub hash: String,
     /// The section's lines as they were before it, which [`restore`] puts back.
@@ -625,7 +627,7 @@ pub fn move_scene(
     scene: &Path,
     to: &Spot,
 ) -> Result<Option<Moved>> {
-    let content = read_unchanged(book, base_hash, "nothing was moved")?;
+    let content = read_unchanged(book, base_hash)?;
     let lines = section(split_frontmatter(&content).1, HEADING).unwrap_or_default();
     let scenes = book.scenes()?;
     let matcher = Matcher::new(&book.dir, &scenes);
@@ -665,7 +667,7 @@ pub fn move_scene(
         }
         (None, None) => return Ok(None),
     };
-    write_moved(book, &content, &lines, listed)
+    write_moved(book, &content, &lines, listed, name)
 }
 
 /// Moves one of `book`'s chapters, counting from 0 across parts, to `to` in its contents, with
@@ -677,10 +679,15 @@ pub fn move_chapter(
     chapter: usize,
     to: ChapterSpot,
 ) -> Result<Option<Moved>> {
-    let content = read_unchanged(book, base_hash, "nothing was moved")?;
+    let content = read_unchanged(book, base_hash)?;
     let lines = section(split_frontmatter(&content).1, HEADING).unwrap_or_default();
     let listed = move_chapter_lines(&lines, chapter, to)?;
-    write_moved(book, &content, &lines, listed)
+    let heading = book
+        .contents()?
+        .chapters()
+        .nth(chapter)
+        .map_or_else(|| UNTITLED.to_string(), Chapter::heading);
+    write_moved(book, &content, &lines, listed, heading)
 }
 
 /// Puts `book`'s contents back as they were before a move, from [`Moved::previous`], unless the
@@ -688,16 +695,19 @@ pub fn move_chapter(
 pub fn restore(book: &Book, base_hash: &str, previous: &[String]) -> Result<String> {
     match save_section(&book.note.path, HEADING, previous, base_hash)? {
         Saved::Written { hash, .. } => Ok(hash),
-        Saved::Conflict { .. } => Err(changed(book, "the move wasn't undone")),
+        Saved::Conflict { .. } => bail!(
+            "{} has changed since that move, so it can't be undone",
+            book.title()
+        ),
     }
 }
 
-fn read_unchanged(book: &Book, base_hash: &str, outcome: &str) -> Result<String> {
+fn read_unchanged(book: &Book, base_hash: &str) -> Result<String> {
     let path = &book.note.path;
     let content =
         fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     if content_hash(&content) != base_hash {
-        return Err(changed(book, outcome));
+        return Err(changed(book));
     }
     Ok(content)
 }
@@ -707,6 +717,7 @@ fn write_moved(
     content: &str,
     previous: &[&str],
     listed: Vec<String>,
+    what: String,
 ) -> Result<Option<Moved>> {
     if listed
         .iter()
@@ -717,16 +728,17 @@ fn write_moved(
     }
     match save_section(&book.note.path, HEADING, &listed, &content_hash(content))? {
         Saved::Written { hash, .. } => Ok(Some(Moved {
+            what,
             hash,
             previous: owned(previous),
         })),
-        Saved::Conflict { .. } => Err(changed(book, "nothing was moved")),
+        Saved::Conflict { .. } => Err(changed(book)),
     }
 }
 
-fn changed(book: &Book, outcome: &str) -> anyhow::Error {
+fn changed(book: &Book) -> anyhow::Error {
     anyhow!(
-        "the contents of {} changed on disk since they were read, so {outcome}",
+        "{} has changed since its contents were read, so nothing was moved",
         book.title()
     )
 }

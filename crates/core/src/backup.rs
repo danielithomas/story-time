@@ -11,7 +11,7 @@ use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, Timelike};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-use crate::vault::Vault;
+use crate::vault::{Vault, data_dir};
 
 /// How many copies to keep: the most recent days that have one.
 pub const KEEP: usize = 30;
@@ -20,24 +20,14 @@ pub const KEEP: usize = 30;
 /// the format 1 upgrade, and compiled manuscripts.
 const LEFT_OUT: [&str; 3] = [".git", ".story-time/backups", ".story-time/build"];
 
-/// Where this computer keeps copies of `vault`: a folder named after the bookshelf in `base`, or
-/// by default in Story Time's data folder. A short hash of the bookshelf's path keeps two
-/// bookshelves with the same name apart.
+/// Where this computer keeps copies of `vault`: the bookshelf's own folder in `base`, or by
+/// default in `backups/` in Story Time's data folder.
 pub fn folder(vault: &Vault, base: Option<&Path>) -> Result<PathBuf> {
     let base = match base {
         Some(base) => base.to_path_buf(),
-        None => dirs::data_dir()
-            .context("this system has no data folder for backups")?
-            .join("story-time")
-            .join("backups"),
+        None => data_dir()?.join("backups"),
     };
-    let name = vault
-        .root
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "bookshelf".to_string());
-    let hash = fnv1a(vault.root.to_string_lossy().as_bytes());
-    Ok(base.join(format!("{name}-{:08x}", hash as u32)))
+    Ok(vault.folder_in(&base))
 }
 
 /// Copies the bookshelf into `folder` as `<date>.zip`, replacing that day's earlier copy, unless
@@ -170,13 +160,6 @@ fn zip_time(time: SystemTime) -> Option<zip::DateTime> {
         time.second() as u8,
     )
     .ok()
-}
-
-/// FNV-1a: a small hash that, unlike std's, stays the same across Rust versions.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
 }
 
 #[cfg(test)]

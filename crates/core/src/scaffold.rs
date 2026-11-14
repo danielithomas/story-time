@@ -1320,35 +1320,52 @@ mod tests {
         let reordered = [vec!["Arrival"], vec!["Leaving Home"], vec!["Fragment"]];
         assert_eq!(order().0, reordered);
 
-        // Undoing each move in turn, newest first, gets back the note as it was.
+        // Undoing each move in turn, newest first, gets back the note as it was. Each undo is
+        // checked against the hash the move or undo before it left, as the app does.
         let mut undo = Vec::new();
-        let mut book_now = load();
+        let mut written = load().hash;
         for to in [
             Spot::Before(leaving.clone()),
             Spot::Unplaced,
             Spot::Chapter(2),
         ] {
-            let moved = move_scene(&vault, &book_now, &book_now.hash, &arrival, &to)
+            let moved = move_scene(&vault, &load(), &written, &arrival, &to)
                 .unwrap()
                 .unwrap();
             undo.push(moved.previous);
-            book_now = load();
+            written = moved.hash;
         }
         assert_eq!(
             order().0,
             [empty, vec!["Leaving Home"], vec!["Fragment", "Arrival"]]
         );
         while let Some(previous) = undo.pop() {
-            let hash = restore(&book_now, &book_now.hash, &previous).unwrap();
-            book_now = load();
-            assert_eq!(hash, book_now.hash);
+            written = restore(&load(), &written, &previous).unwrap();
+            assert_eq!(written, load().hash);
         }
         assert_eq!(order().0, reordered);
-        let stale = book_now.hash.clone();
-        move_chapter(&book_now, &stale, 0, ChapterSpot::After(1)).unwrap();
-        assert!(restore(&book_now, &stale, &[]).is_err(), "nor a stale undo");
+        let moved = move_chapter(&load(), &written, 0, ChapterSpot::After(1))
+            .unwrap()
+            .unwrap();
+        let note = load().note.path;
+        fs::write(
+            &note,
+            fs::read_to_string(&note).unwrap() + "\nAn edit made elsewhere.\n",
+        )
+        .unwrap();
+        assert!(
+            restore(&load(), &moved.hash, &moved.previous).is_err(),
+            "an undo never overwrites a change made since the move"
+        );
+        assert!(
+            fs::read_to_string(&note)
+                .unwrap()
+                .ends_with("An edit made elsewhere.\n")
+        );
 
-        let ending = fs::read_to_string(&book.note.path).unwrap();
+        let ending = fs::read_to_string(&book.note.path)
+            .unwrap()
+            .replace("\nAn edit made elsewhere.\n", "");
         let outside = |text: &str| {
             text.replace(
                 section(text, contents::HEADING)

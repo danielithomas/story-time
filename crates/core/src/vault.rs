@@ -20,7 +20,35 @@ pub struct Vault {
     pub config: Config,
 }
 
+/// Story Time's data folder on this computer. It holds what belongs to the computer rather than
+/// to a bookshelf, such as backups and undo history, outside the bookshelf so a synced folder
+/// doesn't carry it elsewhere and git doesn't see it.
+pub fn data_dir() -> Result<PathBuf> {
+    Ok(dirs::data_dir()
+        .context("this system has no data folder")?
+        .join("story-time"))
+}
+
+/// FNV-1a: a small hash that, unlike std's, stays the same across Rust versions.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 impl Vault {
+    /// This bookshelf's folder in `base`, somewhere outside it: named after the bookshelf, with a
+    /// short hash of its path so two bookshelves with the same name stay apart.
+    pub fn folder_in(&self, base: &Path) -> PathBuf {
+        let name = self
+            .root
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "bookshelf".to_string());
+        let hash = fnv1a(self.root.to_string_lossy().as_bytes());
+        base.join(format!("{name}-{:08x}", hash as u32))
+    }
+
     pub fn open(root: impl AsRef<Path>) -> Result<Vault> {
         let root = root.as_ref();
         let root = root

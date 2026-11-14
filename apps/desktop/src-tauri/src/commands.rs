@@ -24,6 +24,7 @@ use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
 use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::structures::{self, STRUCTURES};
 use story_time_core::text::thousands;
+use story_time_core::undo::Undo;
 use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Project, Scene, Vault, check, config, words};
@@ -1032,23 +1033,24 @@ pub enum ChapterPlace {
     Part(usize),
 }
 
-/// A move on the Board, and the contents as they were, for undoing it.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MoveResult {
-    hash: String,
-    previous: Vec<String>,
+/// Keeps a move to undo later, on this computer. The move itself is done either way.
+fn keep_for_undo(
+    vault: &Vault,
+    book: &Book,
+    base_hash: &str,
+    moved: Option<Moved>,
+) -> CmdResult<bool> {
+    let Some(moved) = moved else {
+        return Ok(false);
+    };
+    Undo::for_vault(vault)
+        .and_then(|undo| undo.record(book, base_hash, &moved))
+        .map_err(|e| format!("Moved {}, but the move can't be undone: {e:#}", moved.what))?;
+    Ok(true)
 }
 
-fn move_result(moved: Option<Moved>) -> Option<MoveResult> {
-    moved.map(|moved| MoveResult {
-        hash: moved.hash,
-        previous: moved.previous,
-    })
-}
-
-/// Moves a scene in a book's contents, unless the book note has changed since `base_hash`.
-/// Returns `None` if the scene was there already.
+/// Moves a scene in a book's contents, unless the book note has changed since `base_hash`, and
+/// keeps the move to undo. Returns whether anything moved.
 #[tauri::command]
 pub async fn move_scene(
     slug: String,
@@ -1057,7 +1059,7 @@ pub async fn move_scene(
     scene: String,
     to: SceneSpot,
     state: State<'_, AppState>,
-) -> CmdResult<Option<MoveResult>> {
+) -> CmdResult<bool> {
     let (vault, _, book) = state.book(&slug, book.as_deref())?;
     let scene = note_path(&vault, &scene)?;
     let to = match to {
@@ -1067,11 +1069,11 @@ pub async fn move_scene(
         SceneSpot::Unplaced => Spot::Unplaced,
     };
     let moved = contents::move_scene(&vault, &book, &base_hash, &scene, &to).or_message()?;
-    Ok(move_result(moved))
+    keep_for_undo(&vault, &book, &base_hash, moved)
 }
 
 /// Moves a chapter, counting from 0 across parts, with its scenes, unless the book note has
-/// changed since `base_hash`. Returns `None` if it was there already.
+/// changed since `base_hash`, and keeps the move to undo. Returns whether anything moved.
 #[tauri::command]
 pub async fn move_chapter(
     slug: String,
@@ -1080,29 +1082,30 @@ pub async fn move_chapter(
     chapter: usize,
     to: ChapterPlace,
     state: State<'_, AppState>,
-) -> CmdResult<Option<MoveResult>> {
-    let (_, _, book) = state.book(&slug, book.as_deref())?;
+) -> CmdResult<bool> {
+    let (vault, _, book) = state.book(&slug, book.as_deref())?;
     let to = match to {
         ChapterPlace::Before(n) => ChapterSpot::Before(n),
         ChapterPlace::After(n) => ChapterSpot::After(n),
         ChapterPlace::Part(n) => ChapterSpot::Part(n),
     };
     let moved = contents::move_chapter(&book, &base_hash, chapter, to).or_message()?;
-    Ok(move_result(moved))
+    keep_for_undo(&vault, &book, &base_hash, moved)
 }
 
-/// Undoes a move: puts back a book's contents as they were, unless the book note has changed
-/// since `base_hash`. Returns the note's new hash.
+/// Undoes the book's latest move on the Board, kept on this computer, unless the book note has
+/// changed since. Returns what moved back: a scene's name or a chapter's heading, or `None` if
+/// there's no move to undo.
 #[tauri::command]
-pub async fn restore_contents(
+pub async fn undo_move(
     slug: String,
     book: Option<String>,
-    base_hash: String,
-    previous: Vec<String>,
     state: State<'_, AppState>,
-) -> CmdResult<String> {
-    let (_, _, book) = state.book(&slug, book.as_deref())?;
-    contents::restore(&book, &base_hash, &previous).or_message()
+) -> CmdResult<Option<String>> {
+    let (vault, _, book) = state.book(&slug, book.as_deref())?;
+    Undo::for_vault(&vault)
+        .and_then(|undo| undo.undo(&book))
+        .or_message()
 }
 
 /// The project with this slug, or `None` for the vault itself.

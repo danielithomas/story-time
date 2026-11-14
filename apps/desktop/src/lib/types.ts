@@ -246,9 +246,3 @@ export type SceneSpot = { before: string } | ScenePlace;
 
 /** Where a moved chapter goes: just before or after another chapter (by index), or first in a part (by index). */
 export type ChapterSpot = { before: number } | { after: number } | { part: number };
-
-/** A move on the Board: the book note's new hash, and its contents as they were, for undoing it. */
-export interface MoveResult {
-  hash: string;
-  previous: string[];
-}

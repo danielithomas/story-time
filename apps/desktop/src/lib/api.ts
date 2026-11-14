@@ -13,7 +13,6 @@ import type {
   CreatedBook,
   FolderInfo,
   Idea,
-  MoveResult,
   NoteDoc,
   ProjectSummary,
   ProjectTree,
@@ -73,12 +72,14 @@ export const api = {
       chapter: typeof place === "object" ? place.chapter : null,
       unplaced: place === "unplaced",
     }),
+  /** Moves a scene, and returns whether anything moved. */
   moveScene: (slug: string, book: string | null, baseHash: string, scene: string, to: SceneSpot) =>
-    invoke<MoveResult | null>("move_scene", { slug, book, baseHash, scene, to }),
+    invoke<boolean>("move_scene", { slug, book, baseHash, scene, to }),
+  /** Moves a chapter, and returns whether anything moved. */
   moveChapter: (slug: string, book: string | null, baseHash: string, chapter: number, to: ChapterSpot) =>
-    invoke<MoveResult | null>("move_chapter", { slug, book, baseHash, chapter, to }),
-  restoreContents: (slug: string, book: string | null, baseHash: string, previous: string[]) =>
-    invoke<string>("restore_contents", { slug, book, baseHash, previous }),
+    invoke<boolean>("move_chapter", { slug, book, baseHash, chapter, to }),
+  /** Undoes the book's latest move, and returns what moved back, or null if there was none to undo. */
+  undoMove: (slug: string, book: string | null) => invoke<string | null>("undo_move", { slug, book }),
   addScrap: (slug: string | null) => invoke<AddedNote>("add_scrap", { slug }),
   addResearch: (slug: string | null, name: string) => invoke<AddedNote>("add_research", { slug, name }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),
