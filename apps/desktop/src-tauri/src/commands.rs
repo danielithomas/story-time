@@ -1095,6 +1095,52 @@ pub async fn move_chapter(
     keep_for_undo(&vault, &book, &base_hash, moved)
 }
 
+/// What deleting a chapter did: its heading, the scenes that went to the trash with it (none
+/// when they stayed in the book, unplaced), and whether it can be undone.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedChapter {
+    heading: String,
+    trashed: Vec<String>,
+    undoable: bool,
+}
+
+/// Deletes a chapter, counting from 0 across parts, from a book's contents, unless the book note
+/// has changed since `base_hash`. Its scenes stay in the book, unplaced, and the deletion can be
+/// undone like a move; with `with_scenes`, they go to the system trash as well, which can't be.
+#[tauri::command]
+pub async fn delete_chapter(
+    slug: String,
+    book: Option<String>,
+    base_hash: String,
+    chapter: usize,
+    with_scenes: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<DeletedChapter> {
+    let (vault, _, book) = state.book(&slug, book.as_deref())?;
+    if with_scenes {
+        let (heading, trashed) =
+            delete::delete_chapter_and_scenes(&vault, &book, &base_hash, chapter, |path| {
+                trash::delete(path)
+                    .map_err(|e| anyhow::anyhow!("couldn't move it to the trash: {e}"))
+            })
+            .or_message()?;
+        return Ok(DeletedChapter {
+            heading,
+            trashed,
+            undoable: false,
+        });
+    }
+    let deleted = contents::delete_chapter(&book, &base_hash, chapter).or_message()?;
+    let heading = deleted.what.clone();
+    keep_for_undo(&vault, &book, &base_hash, Some(deleted))?;
+    Ok(DeletedChapter {
+        heading,
+        trashed: Vec::new(),
+        undoable: true,
+    })
+}
+
 /// Undoes the book's latest move on the Board, kept on this computer, unless the book note has
 /// changed since. Returns what moved back: a scene's name or a chapter's heading, or `None` if
 /// there's no move to undo.

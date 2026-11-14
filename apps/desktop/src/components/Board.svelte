@@ -2,8 +2,9 @@
   import { onMount, tick } from "svelte";
   import { flip } from "svelte/animate";
   import { formatNumber, plainLinks, plural } from "../lib/format";
-  import { addScene, app, moveChapter, moveScene, openNote, refreshTree } from "../lib/store.svelte";
+  import { addScene, app, deleteChapter, moveChapter, moveScene, openNote, refreshTree } from "../lib/store.svelte";
   import type { ChapterRef, ChapterSpot, ScenePlace, SceneRef, SceneSpot } from "../lib/types";
+  import DeleteChapter from "./DeleteChapter.svelte";
 
   /** Where the scene being added goes, as a key: "end", "unplaced" or "chapter:N". */
   let adding = $state<string | null>(null);
@@ -254,6 +255,17 @@
     }
   }
 
+  // ---- Deleting a chapter ----
+
+  /** The chapter whose deletion is being confirmed. An empty one goes at once, since Undo brings it back. */
+  let deleting = $state<ChapterRef | null>(null);
+
+  function askToDelete(chapter: ChapterRef) {
+    if (busy) return;
+    if (chapter.scenes.length) deleting = chapter;
+    else void deleteChapter(chapter, false);
+  }
+
   // ---- Moving with the keyboard ----
 
   /** Alt with an arrow key moves a scene one place earlier or later, across chapters. */
@@ -289,6 +301,11 @@
 
   /** Alt with the up or down arrow moves a chapter one place, into the next part at either end of its own. */
   async function chapterKey(event: KeyboardEvent, chapter: ChapterRef) {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      askToDelete(chapter);
+      return;
+    }
     const up = event.key === "ArrowUp" || event.key === "ArrowLeft";
     if (!event.altKey || busy || !(up || event.key === "ArrowDown" || event.key === "ArrowRight")) return;
     event.preventDefault();
@@ -384,11 +401,18 @@
               class="grip"
               data-grip={chapter.index}
               aria-label="Move {chapter.heading}"
-              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Delete"
               title="Drag to move this chapter, or use Alt and the arrow keys"
               onkeydown={(e) => chapterKey(e, chapter)}
             ></button>
             {chapter.heading} <span class="muted">· {plural(chapter.words, "word")}</span>
+            <button
+              class="remove"
+              aria-label="Delete {chapter.heading}"
+              title={chapter.scenes.length ? "Delete this chapter; its scenes stay in the book" : "Delete this empty chapter"}
+              onpointerdown={(e) => e.stopPropagation()}
+              onclick={() => askToDelete(chapter)}
+            >Delete</button>
           </h2>
           <div class="cards">
             {#each chapter.scenes as scene (scene.path)}
@@ -420,6 +444,10 @@
       </section>
     {/if}
   </div>
+
+  {#if deleting}
+    <DeleteChapter chapter={deleting} close={() => (deleting = null)} />
+  {/if}
 
   {#if dragging}
     <div
@@ -506,6 +534,29 @@
   h2.chapter:hover .grip,
   .grip:focus-visible {
     opacity: 1;
+  }
+
+  .remove {
+    margin-left: 0.4rem;
+    padding: 0 0.4rem;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: normal;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  h2.chapter:hover .remove,
+  .remove:focus-visible {
+    opacity: 1;
+  }
+
+  .remove:hover {
+    color: var(--danger);
+    background: var(--danger-soft);
   }
 
   h2.part {

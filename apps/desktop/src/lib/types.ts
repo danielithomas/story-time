@@ -87,6 +87,13 @@ export interface AddedNote extends NoteRef {
   sameName: string | null;
 }
 
+/** What deleting a chapter did: its heading, the scenes that went to the trash with it, and whether it can be undone. */
+export interface DeletedChapter {
+  heading: string;
+  trashed: string[];
+  undoable: boolean;
+}
+
 /** Links to a note from other notes, which deleting it would leave leading nowhere. */
 export interface NoteLinks {
   links: number;

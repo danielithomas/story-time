@@ -560,6 +560,29 @@ async function moved(
 }
 
 /**
+ * Deletes a chapter of the open book. Its scenes stay in the book, unplaced, and Undo puts the chapter back as it was.
+ * With `withScenes` they go to the system trash too, which Story Time can't undo.
+ */
+export async function deleteChapter(chapter: ChapterRef, withScenes: boolean) {
+  const tree = app.tree;
+  if (!app.slug || !tree?.book || !(await settle())) return;
+  try {
+    const deleted = await api.deleteChapter(app.slug, app.book, tree.book.hash, chapter.index, withScenes);
+    await contentsChanged(tree.book.note.path);
+    const trashed = deleted.trashed.length;
+    const message = trashed
+      ? `Deleted ${deleted.heading} and moved ${plural(trashed, "scene")} to the system trash.`
+      : chapter.scenes.length
+        ? `Deleted ${deleted.heading}. Its scenes are unplaced now.`
+        : `Deleted ${deleted.heading}.`;
+    showMoveToast(message, deleted.undoable);
+  } catch (error) {
+    toastError(error);
+    await refreshTree();
+  }
+}
+
+/**
  * Undoes the open book's latest move on the Board, putting its contents back as they were before it. Each book's
  * moves are kept on this computer, in Story Time's data folder, so they can be undone after switching books or
  * reopening the app. Story Time refuses if the book note has changed since it last left it, and then forgets them.

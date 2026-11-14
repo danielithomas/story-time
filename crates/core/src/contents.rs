@@ -593,6 +593,24 @@ fn move_chapter_lines(lines: &[&str], from: usize, to: ChapterSpot) -> Result<Ve
     Ok(out)
 }
 
+/// The section's lines without chapter `n`, counting from 0 across parts: its item and everything
+/// beneath it. A part it leaves empty keeps its heading.
+fn remove_chapter_lines(lines: &[&str], n: usize) -> Result<Vec<String>> {
+    let listing = Listing::parse(lines);
+    let count = listing.chapters().count();
+    let Some(chapter) = listing.chapters().nth(n) else {
+        bail!(
+            "there is no chapter {} in the contents, which list {count}",
+            n + 1
+        );
+    };
+    let mut out = owned(lines);
+    let range = chapter.lines.clone();
+    out.splice(range.clone(), []);
+    close_gap(&mut out, range.start);
+    Ok(out)
+}
+
 /// Whether the list leaves a blank line between chapters, which a moved chapter keeps to.
 fn is_loose(lines: &[&str], listing: &Listing) -> bool {
     listing.parts.iter().any(|part| {
@@ -682,12 +700,35 @@ pub fn move_chapter(
     let content = read_unchanged(book, base_hash)?;
     let lines = section(split_frontmatter(&content).1, HEADING).unwrap_or_default();
     let listed = move_chapter_lines(&lines, chapter, to)?;
-    let heading = book
+    write_moved(
+        book,
+        &content,
+        &lines,
+        listed,
+        chapter_heading(book, chapter)?,
+    )
+}
+
+/// Deletes one of `book`'s chapters, counting from 0 across parts, from its contents, with
+/// everything beneath its item. Its scenes stay in the book, unplaced. Like a move, it changes
+/// only the `## Contents` section, only if the book note is unchanged since `base_hash`, and can
+/// be undone with [`restore`].
+pub fn delete_chapter(book: &Book, base_hash: &str, chapter: usize) -> Result<Moved> {
+    let content = read_unchanged(book, base_hash)?;
+    let lines = section(split_frontmatter(&content).1, HEADING).unwrap_or_default();
+    let listed = remove_chapter_lines(&lines, chapter)?;
+    let heading = chapter_heading(book, chapter)?;
+    write_moved(book, &content, &lines, listed, heading)?
+        .context("taking a chapter out of the contents changes them")
+}
+
+/// What chapter `n` is called on the page, as the contents read now.
+fn chapter_heading(book: &Book, n: usize) -> Result<String> {
+    Ok(book
         .contents()?
         .chapters()
-        .nth(chapter)
-        .map_or_else(|| UNTITLED.to_string(), Chapter::heading);
-    write_moved(book, &content, &lines, listed, heading)
+        .nth(n)
+        .map_or_else(|| UNTITLED.to_string(), Chapter::heading))
 }
 
 /// Puts `book`'s contents back as they were before a move, from [`Moved::previous`], unless the
@@ -738,7 +779,7 @@ fn write_moved(
 
 fn changed(book: &Book) -> anyhow::Error {
     anyhow!(
-        "{} has changed since its contents were read, so nothing was moved",
+        "{} has changed since its contents were read, so they were left as they are",
         book.title()
     )
 }
@@ -1192,6 +1233,32 @@ mod tests {
         }
         assert_ne!(moved(BOOK, "interlude", Some(Target::End)), BOOK);
         assert!(move_entry(&lines(BOOK), 0, None).is_err());
+    }
+
+    #[test]
+    fn removes_a_chapter_and_everything_beneath_it() {
+        let removed = |n: usize| remove_chapter_lines(&lines(BOOK), n).unwrap().join("\n");
+        assert_eq!(
+            removed(1),
+            BOOK.replace(
+                "- The Long Night\n  - [[leaving-home|Leaving Home]]\n  - a note about this chapter\n",
+                ""
+            ),
+            "its notes go with it"
+        );
+        assert_eq!(removed(2), BOOK.replace("- [[interlude|Interlude]]\n", ""));
+        assert_eq!(
+            removed(3),
+            BOOK.replace("\n\n- Chapter\n  - [[coda|Coda]]", ""),
+            "the part keeps its heading"
+        );
+        assert!(remove_chapter_lines(&lines(BOOK), 4).is_err());
+        assert_eq!(
+            remove_chapter_lines(&lines("%% x %%\n\n- [[a]]\n\n- [[b]]\n\n- [[c]]"), 1)
+                .unwrap()
+                .join("\n"),
+            "%% x %%\n\n- [[a]]\n\n- [[c]]"
+        );
     }
 
     fn chapter_moved(text: &str, from: usize, to: ChapterSpot) -> String {

@@ -70,6 +70,44 @@ pub fn delete(
     Ok(name)
 }
 
+/// Deletes chapter `chapter` of `book`, counting from 0 across parts, from its contents, and
+/// hands each of its scenes to `discard`: in the app, the system trash. Unlike taking the chapter
+/// out alone ([`contents::delete_chapter`]), Story Time can't undo this, though the trash can.
+/// Refused if the book note has changed since `base_hash`, the hash of the contents the writer
+/// saw. Returns the chapter's heading and its scenes' names.
+pub fn delete_chapter_and_scenes(
+    vault: &Vault,
+    book: &Book,
+    base_hash: &str,
+    chapter: usize,
+    mut discard: impl FnMut(&Path) -> Result<()>,
+) -> Result<(String, Vec<String>)> {
+    if book.hash != base_hash {
+        bail!(
+            "{} has changed since its contents were read, so they were left as they are",
+            book.title()
+        );
+    }
+    let scenes: Vec<(PathBuf, String)> = book
+        .contents()?
+        .chapters()
+        .nth(chapter)
+        .map(|chapter| {
+            let scenes = chapter.scenes.iter();
+            scenes
+                .map(|scene| (scene.note.path.clone(), scene.title()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let deleted = contents::delete_chapter(book, base_hash, chapter)?;
+    let mut names = Vec::new();
+    for (path, name) in scenes {
+        discard(&path).with_context(|| format!("deleting {}", vault.relative(&path).display()))?;
+        names.push(name);
+    }
+    Ok((deleted.what, names))
+}
+
 /// Where a cut or put-back scene is now, and how many links were rewritten in how many notes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Relocated {
@@ -400,6 +438,74 @@ mod tests {
             put_back(&vault, &again.path, &elsewhere).is_err(),
             "only into its own world"
         );
+    }
+
+    #[test]
+    fn deletes_a_chapter_keeping_its_scenes_or_with_them() {
+        let (dir, vault) = vault();
+        let (project, book) = project(&vault, "Sample Story");
+        for name in ["Arrival", "Leaving Home", "Coda"] {
+            scene(&vault, &project, &book, name);
+        }
+        let first_light = add_scene(
+            &vault,
+            &project,
+            &reload(&book),
+            "First Light",
+            Place::Chapter(0),
+            today(),
+        )
+        .unwrap()
+        .path;
+        assert_eq!(
+            placed(&book),
+            ["Arrival", "First Light", "Leaving Home", "Coda"]
+        );
+
+        // Taking the first chapter out leaves its scenes in the book, and can be undone.
+        let before = reload(&book);
+        let deleted = contents::delete_chapter(&before, &before.hash, 0).unwrap();
+        assert_eq!(deleted.what, "Chapter 1");
+        assert_eq!(placed(&book), ["Leaving Home", "Coda"]);
+        let unplaced: Vec<String> = reload(&book)
+            .contents()
+            .unwrap()
+            .unplaced
+            .iter()
+            .map(|scene| scene.title())
+            .collect();
+        assert_eq!(unplaced, ["Arrival", "First Light"]);
+        assert!(
+            contents::delete_chapter(&before, &before.hash, 0).is_err(),
+            "not from stale contents"
+        );
+        contents::restore(&reload(&book), &deleted.hash, &deleted.previous).unwrap();
+        assert_eq!(
+            placed(&book),
+            ["Arrival", "First Light", "Leaving Home", "Coda"]
+        );
+
+        // With its scenes, they go to the trash too.
+        let trash = dir.path().join("trash");
+        fs::create_dir(&trash).unwrap();
+        let to_trash = |path: &Path| {
+            fs::rename(path, trash.join(path.file_name().unwrap())).map_err(Into::into)
+        };
+        let now = reload(&book);
+        assert!(delete_chapter_and_scenes(&vault, &now, "stale", 0, to_trash).is_err());
+        let (heading, names) =
+            delete_chapter_and_scenes(&vault, &now, &now.hash, 0, to_trash).unwrap();
+        assert_eq!(
+            (heading.as_str(), names),
+            (
+                "Chapter 1",
+                vec!["Arrival".to_string(), "First Light".to_string()]
+            )
+        );
+        assert!(!first_light.exists() && trash.join("first-light.md").exists());
+        assert_eq!(placed(&book), ["Leaving Home", "Coda"]);
+        assert!(reload(&book).contents().unwrap().unplaced.is_empty());
+        assert!(contents::delete_chapter(&reload(&book), &reload(&book).hash, 9).is_err());
     }
 
     fn project_named(vault: &Vault, title: &str) -> (Project, Book) {

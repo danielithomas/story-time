@@ -8,6 +8,7 @@ import type {
   BookProgress,
   ChapterSpot,
   CheckReport,
+  DeletedChapter,
   Choices,
   CompileResult,
   CreatedBook,
@@ -81,6 +82,9 @@ export const api = {
   /** Moves a chapter, and returns whether anything moved. */
   moveChapter: (slug: string, book: string | null, baseHash: string, chapter: number, to: ChapterSpot) =>
     invoke<boolean>("move_chapter", { slug, book, baseHash, chapter, to }),
+  /** Deletes a chapter: its scenes stay in the book, unplaced, or with `withScenes` go to the system trash too. */
+  deleteChapter: (slug: string, book: string | null, baseHash: string, chapter: number, withScenes: boolean) =>
+    invoke<DeletedChapter>("delete_chapter", { slug, book, baseHash, chapter, withScenes }),
   /** Undoes the book's latest move, and returns what moved back, or null if there was none to undo. */
   undoMove: (slug: string, book: string | null) => invoke<string | null>("undo_move", { slug, book }),
   renameNote: (path: string, name: string | null) => invoke<RenamedNote>("rename_note", { path, name }),
