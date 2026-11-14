@@ -74,9 +74,8 @@ The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop a
 Ordered roughly by value for effort:
 
 1. **Desktop app, next steps.** Delete notes, and test the Windows and macOS installers.
-2. **Renaming.** Rename a note and update every `[[link]]` to it, from the CLI and the app, and offer it for the names `check` reports. Today that means renaming in Obsidian, which updates links itself.
-3. **Style-sheet check.** Flag near-miss spellings of bible names and terms (*Marra* for *Mara*) using edit distance.
-4. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
-5. **Standard manuscript format.** A pandoc reference document so `compile --format docx` produces William Shunn's submission format (12-point serif, double-spaced, header with surname / title / page).
-6. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
-7. **`--json` output** for integrations: Obsidian's Shell Commands plugin, n8n, or a web dashboard.
+2. **Style-sheet check.** Flag near-miss spellings of bible names and terms (*Marra* for *Mara*) using edit distance.
+3. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
+4. **Standard manuscript format.** A pandoc reference document so `compile --format docx` produces William Shunn's submission format (12-point serif, double-spaced, header with surname / title / page).
+5. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
+6. **`--json` output** for integrations: Obsidian's Shell Commands plugin, n8n, or a web dashboard.

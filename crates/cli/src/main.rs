@@ -138,6 +138,15 @@ enum Command {
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
     Check { project: Option<String> },
+    /// Rename a scene, character, location, world note or research note: its name, its file name
+    /// and every link to it change together.
+    Rename {
+        /// The note: its name, its file name, or the path to it.
+        note: String,
+        /// Its new name. Without one, it keeps its name and its file is renamed to match, as
+        /// `check` suggests for a file name that no longer matches.
+        name: Option<String>,
+    },
     /// Convert a bookshelf from story-time 0.1's layout to the current one, after copying it into
     /// .story-time/backups/.
     Upgrade {
@@ -357,6 +366,7 @@ fn run(cli: Cli) -> Result<()> {
             now,
         ),
         Command::Check { project } => commands::check(&vault, &cwd, project.as_deref()),
+        Command::Rename { note, name } => commands::rename(&vault, &cwd, &note, name.as_deref()),
         Command::Compile {
             project,
             book,

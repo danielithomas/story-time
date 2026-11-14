@@ -87,6 +87,15 @@ export interface AddedNote extends NoteRef {
   sameName: string | null;
 }
 
+/** What a rename did: where the note is now, its name, and how many links changed in how many notes. */
+export interface RenamedNote {
+  path: string;
+  name: string;
+  links: number;
+  notes: number;
+  sameName: string | null;
+}
+
 export interface SceneRef extends NoteRef {
   status: string | null;
   pov: string | null;
@@ -212,8 +221,9 @@ export interface CheckReport {
   brokenEntries: { name: string; sources: string[] }[];
   repeated: string[];
   notOnPage: { kind: string; name: string }[];
-  misnamed: { path: string; to: string }[];
-  drifted: { path: string; to: string }[];
+  /** Each with the note's full path when Story Time can rename it. */
+  misnamed: { path: string; to: string; note: string | null }[];
+  drifted: { path: string; to: string; note: string | null }[];
   withoutStatus: string[];
   withoutSynopsis: string[];
   emptyScenes: string[];

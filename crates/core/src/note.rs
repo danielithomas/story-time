@@ -187,7 +187,7 @@ pub fn save_section(
     })
 }
 
-fn write_atomically(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_atomically(path: &Path, content: &str) -> Result<()> {
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let temp = path.with_file_name(format!(".{name}.story-time-tmp"));
     fs::write(&temp, content).with_context(|| format!("writing {}", temp.display()))?;

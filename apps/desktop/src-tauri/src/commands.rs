@@ -20,6 +20,7 @@ use story_time_core::note::{self, Note, PropertyValue, Saved};
 use story_time_core::project::{
     BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, RESEARCH_DIR, SCENE_STATUSES, SCRATCHPAD_DIR,
 };
+use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
 use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::structures::{self, STRUCTURES};
@@ -1108,6 +1109,41 @@ pub async fn undo_move(
         .or_message()
 }
 
+/// What a rename did: where the note is now, its name, and how many links changed in how many
+/// notes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedNote {
+    path: String,
+    name: String,
+    links: usize,
+    notes: usize,
+    /// Another note with the same file name, which makes bare links to it ambiguous in Obsidian.
+    same_name: Option<String>,
+}
+
+/// Renames a scene, world-bible note or research note: its name, its file name and every link to
+/// it. With no name, it keeps its name and its file is renamed to match.
+#[tauri::command]
+pub async fn rename_note(
+    path: String,
+    name: Option<String>,
+    state: State<'_, AppState>,
+) -> CmdResult<RenamedNote> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    let renamed = rename::rename(&vault, &path, name.as_deref()).or_message()?;
+    Ok(RenamedNote {
+        path: renamed.path.display().to_string(),
+        name: renamed.name,
+        links: renamed.links,
+        notes: renamed.notes,
+        same_name: renamed
+            .same_name
+            .map(|path| vault.relative(&path).display().to_string()),
+    })
+}
+
 /// The project with this slug, or `None` for the vault itself.
 fn owner(state: &AppState, slug: Option<&str>) -> CmdResult<(Vault, Option<Project>)> {
     match slug {
@@ -1354,6 +1390,8 @@ pub struct Unreadable {
 pub struct Rename {
     path: String,
     to: String,
+    /// The note's full path, if Story Time can rename it: a scene, world-bible note or research.
+    note: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1392,6 +1430,7 @@ pub async fn check_project(slug: String, state: State<'_, AppState>) -> CmdResul
             .map(|(path, to)| Rename {
                 path: vault.relative(&path).display().to_string(),
                 to,
+                note: rename::can_rename(&vault, &path).then(|| path.display().to_string()),
             })
             .collect()
     };

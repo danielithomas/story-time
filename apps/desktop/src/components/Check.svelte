@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { addNote, allNotes, app, openNote, toastError } from "../lib/store.svelte";
+  import { addNote, allNotes, app, openNote, renameNote, toastError } from "../lib/store.svelte";
   import type { BibleKind, CheckReport } from "../lib/types";
 
   let report = $state<CheckReport | null>(null);
@@ -27,6 +27,11 @@
   async function create(kind: BibleKind, name: string) {
     await addNote(kind, name);
     await run();
+  }
+
+  /** Gives a note's file the name it should have, updating every link to it. */
+  async function fixName(path: string) {
+    if (await renameNote(path, null)) await run();
   }
 
   const clean = $derived(
@@ -154,7 +159,13 @@
           <h2>{group.title}</h2>
           <ul>
             {#each group.items as item (item.path)}
-              <li><strong>{item.path}</strong> <span class="muted">rename to {item.to}</span></li>
+              <li>
+                <strong>{item.path}</strong> <span class="muted">rename to {item.to}</span>
+                {#if item.note}
+                  {@const note = item.note}
+                  <span class="actions"><button class="btn" onclick={() => fixName(note)}>Rename</button></span>
+                {/if}
+              </li>
             {/each}
           </ul>
         </section>

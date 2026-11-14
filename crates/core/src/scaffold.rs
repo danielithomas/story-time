@@ -358,7 +358,7 @@ pub(crate) fn taken_ids(vault: &Vault) -> Result<HashSet<String>> {
 /// Lower-cased file names of the project's notes, which must be unique within it. With `book`,
 /// scenes in the project's other books are left out, since scenes in different books may share a
 /// name.
-fn project_stems(project: &Project, book: Option<&Book>) -> Result<HashSet<String>> {
+pub(crate) fn project_stems(project: &Project, book: Option<&Book>) -> Result<HashSet<String>> {
     let others: Vec<PathBuf> = match book {
         Some(book) => project
             .books()?
@@ -654,7 +654,7 @@ fn opening_with(content: &str, block: &str) -> String {
 }
 
 /// Lower-cased file names of the notes in `dir`.
-fn stems(dir: &Path) -> Result<HashSet<String>> {
+pub(crate) fn stems(dir: &Path) -> Result<HashSet<String>> {
     Ok(markdown_files(dir)?
         .iter()
         .filter_map(|path| path.file_stem())

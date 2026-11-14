@@ -47,6 +47,7 @@ fn main() {
             commands::move_scene,
             commands::move_chapter,
             commands::undo_move,
+            commands::rename_note,
             commands::add_scrap,
             commands::add_research,
             commands::link_for,

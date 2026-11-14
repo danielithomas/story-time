@@ -1,6 +1,6 @@
 <script lang="ts">
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
-  import { app, linkFrom, setProperty, toastError } from "../lib/store.svelte";
+  import { app, linkFrom, renameNote, setProperty, toastError } from "../lib/store.svelte";
   import type { NoteRef } from "../lib/types";
 
   const doc = $derived(app.doc);
@@ -29,7 +29,7 @@
     return Array.isArray(value) ? value.join(", ") : (value ?? "");
   }
 
-  /** The choices for a select, keeping a value typed elsewhere (in Obsidian, say) that isn't one of them. */
+  /** The choices for a select, keeping a value typed into the note by hand that isn't one of them. */
   function options(list: string[], current: string): string[] {
     return current && !list.includes(current) ? ["", ...list, current] : ["", ...list];
   }
@@ -60,6 +60,28 @@
     }
   }
 
+  /** The note's other names: its aliases after the first, which is its name. */
+  const otherNames = $derived.by(() => {
+    const aliases = doc?.properties.aliases;
+    return (Array.isArray(aliases) ? aliases : aliases ? [aliases] : []).slice(1).join(", ");
+  });
+
+  /** Renames the note, its file and every link to it. A refused name goes back to the note's own. */
+  async function rename(input: HTMLInputElement) {
+    if (!doc) return;
+    const name = input.value.trim();
+    if (!name || name === doc.title || !(await renameNote(doc.path, name))) input.value = app.doc?.title ?? "";
+  }
+
+  function setOtherNames(value: string) {
+    if (!doc) return;
+    const others = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    setProperty("aliases", [doc.title, ...others]);
+  }
+
   const structureName = $derived(
     choices?.structures.find((s) => s.key === text("structure"))?.label ?? (text("structure") || "freeform"),
   );
@@ -79,6 +101,25 @@
   });
 </script>
 
+{#snippet nameField(label: string)}
+  <label class="field">
+    <span>{label}</span>
+    <input
+      value={doc?.title ?? ""}
+      title="Renaming changes the file name and every link to this note too"
+      onchange={(e) => rename(e.currentTarget)}
+      onkeydown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+    />
+  </label>
+{/snippet}
+
+{#snippet otherNamesField(placeholder: string)}
+  <label class="field">
+    <span>Other names</span>
+    <input value={otherNames} {placeholder} onchange={(e) => setOtherNames(e.currentTarget.value)} />
+  </label>
+{/snippet}
+
 <aside class="inspector">
   {#if doc && choices}
     <h2>{headings[doc.kind]}</h2>
@@ -88,8 +129,9 @@
         <p class="muted">{scenePosition}</p>
       {:else}
         <p class="muted">Unplaced: not in the book's contents yet.</p>
-        <p class="hint">To place it, link it under <strong>Contents</strong> in the book's overview.</p>
+        <p class="hint">To place it, drag it into a chapter on the Board.</p>
       {/if}
+      {@render nameField("Name")}
       <label class="field">
         <span>Status</span>
         <select value={text("status")} onchange={(e) => setProperty("status", e.currentTarget.value)}>
@@ -144,16 +186,12 @@
         ></textarea>
       </label>
     {:else if doc.kind === "character"}
-      <label class="field">
-        <span>Names</span>
-        <input value={text("aliases")} placeholder="Name, then nicknames" onchange={(e) => setList("aliases", e.currentTarget.value)} />
-      </label>
-      <p class="hint">The first is the note's name; add nicknames and short names after it, separated by commas. Checks look for all of them on the page.</p>
+      {@render nameField("Name")}
+      {@render otherNamesField("Nicknames and short names")}
+      <p class="hint">Checks look for every name on the page.</p>
     {:else if doc.kind === "location"}
-      <label class="field">
-        <span>Names</span>
-        <input value={text("aliases")} placeholder="Name, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
-      </label>
+      {@render nameField("Name")}
+      {@render otherNamesField("Other names")}
     {:else if doc.kind === "world"}
       <label class="field">
         <span>Category</span>
@@ -169,10 +207,8 @@
           <option value={category}></option>
         {/each}
       </datalist>
-      <label class="field">
-        <span>Names</span>
-        <input value={text("aliases")} placeholder="Name, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
-      </label>
+      {@render nameField("Name")}
+      {@render otherNamesField("Other names")}
     {:else if doc.kind === "project"}
       <label class="field">
         <span>Title</span>
@@ -245,10 +281,8 @@
         <span>Source</span>
         <input value={text("source")} placeholder="A URL or citation" onchange={(e) => setProperty("source", e.currentTarget.value)} />
       </label>
-      <label class="field">
-        <span>Names</span>
-        <input value={text("aliases")} placeholder="Subject, then other names" onchange={(e) => setList("aliases", e.currentTarget.value)} />
-      </label>
+      {@render nameField("Subject")}
+      {@render otherNamesField("Other names")}
       <p class="hint">What's true in the real world, for the story to use or knowingly break. It doesn't count toward your daily goal or any book.</p>
     {:else if doc.kind === "scrap"}
       {#if text("created")}

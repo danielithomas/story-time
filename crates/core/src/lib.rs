@@ -21,6 +21,7 @@ pub mod ids;
 pub mod links;
 pub mod note;
 pub mod project;
+pub mod rename;
 pub mod scaffold;
 pub mod scratchpad;
 pub mod structures;

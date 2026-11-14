@@ -342,6 +342,48 @@ fn the_example_book() {
     assert!(!again.status.success(), "only once");
 }
 
+#[test]
+fn renames_notes_and_the_links_to_them() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    ok(root, &["init", "--example"]);
+    let renamed = ok(root, &["rename", "The Writer", "The Author"]);
+    assert!(
+        renamed.contains(
+            "Renamed The Writer to The Author: example-world/bible/characters/the-author.md."
+        ),
+        "{renamed}"
+    );
+    assert!(renamed.contains("Updated "), "{renamed}");
+    let scene = "example-world/books/a-tour-of-story-time/scenes/notes-to-self.md";
+    let moved = ok(root, &["rename", scene, "Notes to Myself"]);
+    assert!(moved.contains("scenes/notes-to-myself.md"), "{moved}");
+    let book = fs::read_to_string(
+        root.join("example-world/books/a-tour-of-story-time/a-tour-of-story-time.md"),
+    )
+    .unwrap();
+    assert!(
+        book.contains("- [[notes-to-myself|Notes to Myself]]"),
+        "{book}"
+    );
+    let check = ok(root, &["check"]);
+    assert!(check.contains("Nothing to report."), "{check}");
+    let outline = ok(root, &["outline"]);
+    assert!(outline.contains("Notes to Myself"), "{outline}");
+
+    let nothing = ok(root, &["rename", "the-author"]);
+    assert!(nothing.contains("Nothing to rename"), "{nothing}");
+    let taken = run(root, &["rename", "The Author", "The Binder"]);
+    assert!(
+        taken.status.success(),
+        "a character may share a location's name"
+    );
+    let refused = run(root, &["rename", "example-world/example-world.md", "Other"]);
+    assert!(!refused.status.success());
+    let unknown = run(root, &["rename", "Nobody", "Somebody"]);
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("no scene, character"));
+}
+
 // Only Linux honours XDG_DATA_HOME, so elsewhere this would write to the real data folder.
 #[cfg(target_os = "linux")]
 #[test]

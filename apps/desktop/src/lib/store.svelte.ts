@@ -420,6 +420,38 @@ async function added(add: () => Promise<{ path: string; name: string; sameName: 
   }
 }
 
+/**
+ * Renames a scene, world-bible note or research note: its name, its file name and every link to it change together.
+ * With no name, its file is renamed to match its name. Returns whether it was renamed.
+ */
+export async function renameNote(path: string, name: string | null): Promise<boolean> {
+  if (!(await settle())) return false;
+  try {
+    const renamed = await api.renameNote(path, name);
+    if (app.slug) app.tree = await api.projectTree(app.slug, app.book);
+    const open = app.doc;
+    if (open?.path === path) {
+      setDoc(await api.readNote(renamed.path));
+      if (app.slug) remember(`note:${app.slug}`, renamed.path);
+    } else if (open && renamed.notes) {
+      // The open note may have linked to the renamed one, and so have changed on disk.
+      const fresh = await api.readNote(open.path);
+      if (fresh.hash !== open.hash && app.doc?.path === open.path && !hasPending()) setDoc(fresh);
+    }
+    const file = renamed.path.split(/[\\/]/).pop();
+    const done = name === null ? `Renamed the file to ${file}.` : `Renamed to ${renamed.name}.`;
+    const links = renamed.links ? ` Updated ${plural(renamed.links, "link")} in ${plural(renamed.notes, "note")}.` : "";
+    toast(done + links);
+    if (renamed.sameName) {
+      toast(`${renamed.sameName} has the same file name, so links to it may open either note in Obsidian.`);
+    }
+    return true;
+  } catch (error) {
+    toastError(error);
+    return false;
+  }
+}
+
 // ---- Moving scenes and chapters on the Board ----
 
 /** The message about the latest move, which offers to undo it. */

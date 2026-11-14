@@ -14,6 +14,7 @@ import type {
   FolderInfo,
   Idea,
   NoteDoc,
+  RenamedNote,
   ProjectSummary,
   ProjectTree,
   PropertyValue,
@@ -80,6 +81,7 @@ export const api = {
     invoke<boolean>("move_chapter", { slug, book, baseHash, chapter, to }),
   /** Undoes the book's latest move, and returns what moved back, or null if there was none to undo. */
   undoMove: (slug: string, book: string | null) => invoke<string | null>("undo_move", { slug, book }),
+  renameNote: (path: string, name: string | null) => invoke<RenamedNote>("rename_note", { path, name }),
   addScrap: (slug: string | null) => invoke<AddedNote>("add_scrap", { slug }),
   addResearch: (slug: string | null, name: string) => invoke<AddedNote>("add_research", { slug, name }),
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),

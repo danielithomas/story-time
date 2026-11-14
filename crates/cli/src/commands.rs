@@ -13,6 +13,7 @@ use story_time_core::contents::Place;
 use story_time_core::example;
 use story_time_core::history::History;
 use story_time_core::ideas;
+use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
 use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::upgrade;
@@ -755,7 +756,7 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
             ]);
         }
         table.print(4);
-        println!();
+        println!("    A note can be renamed to match with `story-time rename <file>`.\n");
     }
     for (label, scenes) in [
         (
@@ -775,6 +776,36 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
         for (path, error) in &report.unreadable_frontmatter {
             println!("    {}: {error}", vault.relative(path).display());
         }
+    }
+    Ok(())
+}
+
+pub fn rename(vault: &Vault, cwd: &Path, note: &str, name: Option<&str>) -> Result<()> {
+    let path = rename::find(vault, cwd, note)?;
+    let old_name = story_time_core::note::Note::load(&path)?.title();
+    let renamed = rename::rename(vault, &path, name)?;
+    let file = vault.relative(&renamed.path).display();
+    if renamed.path == path && renamed.name == old_name {
+        println!("Nothing to rename: {file} already matches its name, {old_name}.");
+        return Ok(());
+    }
+    if renamed.name == old_name {
+        println!("Renamed {} to {file}.", vault.relative(&path).display());
+    } else {
+        println!("Renamed {old_name} to {}: {file}.", renamed.name);
+    }
+    if renamed.links > 0 {
+        println!(
+            "Updated {} in {}.",
+            plural(renamed.links as u64, "link", "links"),
+            plural(renamed.notes as u64, "note", "notes")
+        );
+    }
+    if let Some(other) = renamed.same_name {
+        println!(
+            "{} has the same file name, so bare links to it may open either note in Obsidian.",
+            vault.relative(&other).display()
+        );
     }
     Ok(())
 }
