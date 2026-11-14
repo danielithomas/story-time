@@ -51,6 +51,8 @@ fn main() {
             commands::rename_note,
             commands::links_to_note,
             commands::delete_note,
+            commands::delete_book,
+            commands::delete_project,
             commands::cut_scene,
             commands::put_back_scene,
             commands::add_scrap,

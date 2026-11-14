@@ -83,8 +83,8 @@ impl Undo {
         fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
     }
 
-    /// Forgets the book's history.
-    fn forget(&self, book: &Book) -> Result<()> {
+    /// Forgets the book's history, as when it's deleted.
+    pub fn forget(&self, book: &Book) -> Result<()> {
         match fs::remove_file(self.path(book)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
                 Err(error).with_context(|| format!("removing {}", self.path(book).display()))

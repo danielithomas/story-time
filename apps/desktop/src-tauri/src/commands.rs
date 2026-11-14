@@ -1120,11 +1120,8 @@ pub async fn delete_chapter(
     let (vault, _, book) = state.book(&slug, book.as_deref())?;
     if with_scenes {
         let (heading, trashed) =
-            delete::delete_chapter_and_scenes(&vault, &book, &base_hash, chapter, |path| {
-                trash::delete(path)
-                    .map_err(|e| anyhow::anyhow!("couldn't move it to the trash: {e}"))
-            })
-            .or_message()?;
+            delete::delete_chapter_and_scenes(&vault, &book, &base_hash, chapter, to_trash)
+                .or_message()?;
         return Ok(DeletedChapter {
             heading,
             trashed,
@@ -1219,6 +1216,57 @@ pub async fn rename_note(
     })
 }
 
+/// Moves a file or folder to the system trash, where it can be restored.
+fn to_trash(path: &Path) -> anyhow::Result<()> {
+    trash::delete(path).map_err(|e| anyhow::anyhow!("couldn't move it to the trash: {e}"))
+}
+
+/// What deleting a book did: its title, and how many of its scenes moved to its world's
+/// scratchpad.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletedBook {
+    title: String,
+    kept: usize,
+}
+
+/// Deletes a book. Its scenes move to its world's scratchpad, unless `with_scenes`, and the rest
+/// of its folder goes to the system trash; it comes out of the world's list of books. Its undo
+/// history on this computer is forgotten.
+#[tauri::command]
+pub async fn delete_book(
+    slug: String,
+    book: String,
+    with_scenes: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<DeletedBook> {
+    let (vault, project, book) = state.book(&slug, Some(&book))?;
+    let deleted =
+        delete::delete_book(&vault, &project, &book, with_scenes, to_trash).or_message()?;
+    if let Ok(undo) = Undo::for_vault(&vault) {
+        undo.forget(&book).ok();
+    }
+    Ok(DeletedBook {
+        title: deleted.title,
+        kept: deleted.kept,
+    })
+}
+
+/// Deletes a world, sending its whole folder to the system trash in one piece. Its books' undo
+/// histories on this computer are forgotten. Returns its title.
+#[tauri::command]
+pub async fn delete_project(slug: String, state: State<'_, AppState>) -> CmdResult<String> {
+    let (vault, project) = state.project(&slug)?;
+    let books = project.books().or_message()?;
+    let title = delete::delete_project(&vault, &project, to_trash).or_message()?;
+    if let Ok(undo) = Undo::for_vault(&vault) {
+        for book in &books {
+            undo.forget(book).ok();
+        }
+    }
+    Ok(title)
+}
+
 /// Links to a note from other notes, which deleting it would leave leading nowhere.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1241,10 +1289,7 @@ pub async fn links_to_note(path: String, state: State<'_, AppState>) -> CmdResul
 pub async fn delete_note(path: String, state: State<'_, AppState>) -> CmdResult<String> {
     let vault = state.vault()?;
     let path = note_path(&vault, &path)?;
-    delete::delete(&vault, &path, |path| {
-        trash::delete(path).map_err(|e| anyhow::anyhow!("couldn't move it to the trash: {e}"))
-    })
-    .or_message()
+    delete::delete(&vault, &path, to_trash).or_message()
 }
 
 /// Where a cut or put-back scene is now, and how many links were rewritten in how many notes.

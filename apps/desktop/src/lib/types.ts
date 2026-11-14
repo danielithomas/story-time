@@ -87,6 +87,12 @@ export interface AddedNote extends NoteRef {
   sameName: string | null;
 }
 
+/** What deleting a book did: its title, and how many of its scenes moved to its world's scratchpad. */
+export interface DeletedBook {
+  title: string;
+  kept: number;
+}
+
 /** What deleting a chapter did: its heading, the scenes that went to the trash with it, and whether it can be undone. */
 export interface DeletedChapter {
   heading: string;

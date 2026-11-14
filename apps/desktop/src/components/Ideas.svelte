@@ -59,7 +59,8 @@
           <p>
             <strong>{idea.name}</strong>{@html inlineMarkdown(idea.text.slice(idea.name.length))}
           </p>
-          {#if idea.project}
+          <!-- An idea whose world was deleted keeps its link, since the ideas file is only added to. -->
+          {#if idea.project && app.projects.some((project) => project.slug === idea.project)}
             {@const slug = idea.project}
             <button class="btn" onclick={() => selectProject(slug).then(() => (app.view = "write"))}>
               Open {projectTitle(slug)}

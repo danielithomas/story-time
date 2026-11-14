@@ -480,6 +480,44 @@ export async function deleteNote(path: string) {
   }
 }
 
+/**
+ * Deletes the open book. Its scenes move to its world's scratchpad, unless `withScenes`, and the rest of it goes to the
+ * system trash. The world's next book opens, or the world itself if it has no other.
+ */
+export async function deleteBook(withScenes: boolean) {
+  const [slug, book] = [app.slug, app.book];
+  if (!slug || !book || !(await settle())) return;
+  const world = app.tree?.project.title ?? "the world";
+  try {
+    const deleted = await api.deleteBook(slug, book, withScenes);
+    await loadProjects();
+    const next = app.projects.find((project) => project.slug === slug)?.books[0]?.slug ?? null;
+    await selectProject(slug, next);
+    const scenes = deleted.kept === 1 ? "Its scene is" : `Its ${plural(deleted.kept, "scene")} are`;
+    toast(
+      deleted.kept
+        ? `Deleted ${deleted.title}. ${scenes} in ${world}'s scratchpad; the rest went to the system trash.`
+        : `Moved ${deleted.title} to the system trash.`,
+    );
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Deletes the open world, sending its whole folder to the system trash in one piece. Another world opens, if any. */
+export async function deleteProject() {
+  const slug = app.slug;
+  if (!slug || !(await settle())) return;
+  try {
+    const title = await api.deleteProject(slug);
+    clearDoc();
+    await enterVault();
+    toast(`Moved ${title} to the system trash, with everything in it. Restore it from there if you need it back.`);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
 /** Cuts a scene from its book to its world's scratchpad, out of the book's contents. It stays open. */
 export async function cutScene(path: string) {
   await relocated(path, () => api.cutScene(path), (moved) => {

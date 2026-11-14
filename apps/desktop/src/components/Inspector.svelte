@@ -2,6 +2,7 @@
   import { capitalise, formatNumber, plainLinks, plural } from "../lib/format";
   import { app, cutScene, linkFrom, putBackScene, renameNote, setProperty, toastError } from "../lib/store.svelte";
   import type { NoteRef } from "../lib/types";
+  import DeleteFolder from "./DeleteFolder.svelte";
   import DeleteNote from "./DeleteNote.svelte";
 
   const doc = $derived(app.doc);
@@ -64,6 +65,8 @@
   /** Kinds of note that can be deleted from here; a book's and world's own notes can't. */
   const DELETABLE = ["scene", "character", "location", "world", "research", "scrap"];
   let deleting = $state(false);
+  /** Deleting the open book or world, from its own note. */
+  let deletingFolder = $state<"book" | "project" | null>(null);
 
   /** A scene cut to this world's scratchpad, which can go back into the open book. */
   const canPutBack = $derived(
@@ -318,6 +321,15 @@
       </div>
     {/if}
 
+    {#if (doc.kind === "book" && doc.book === app.book) || (doc.kind === "project" && doc.project === app.slug)}
+      {@const kind = doc.kind}
+      <div class="note-actions">
+        <button class="btn danger" onclick={() => (deletingFolder = kind)}>
+          {kind === "book" ? "Delete book…" : "Delete world…"}
+        </button>
+      </div>
+    {/if}
+
     <div class="facts">
       <span>{plural(app.docWords, "word")}</span>
       {#if doc.kind === "book" && app.tree?.book}
@@ -332,6 +344,10 @@
 
 {#if deleting && doc}
   <DeleteNote {doc} close={() => (deleting = false)} />
+{/if}
+
+{#if deletingFolder}
+  <DeleteFolder kind={deletingFolder} close={() => (deletingFolder = null)} />
 {/if}
 
 <style>

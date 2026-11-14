@@ -8,6 +8,7 @@ import type {
   BookProgress,
   ChapterSpot,
   CheckReport,
+  DeletedBook,
   DeletedChapter,
   Choices,
   CompileResult,
@@ -90,6 +91,11 @@ export const api = {
   renameNote: (path: string, name: string | null, open: string | null) =>
     invoke<RenamedNote>("rename_note", { path, name, open }),
   linksToNote: (path: string) => invoke<NoteLinks>("links_to_note", { path }),
+  /** Deletes a book: its scenes move to its world's scratchpad unless `withScenes`, and the rest goes to the trash. */
+  deleteBook: (slug: string, book: string, withScenes: boolean) =>
+    invoke<DeletedBook>("delete_book", { slug, book, withScenes }),
+  /** Sends a world's whole folder to the system trash, and returns its title. */
+  deleteProject: (slug: string) => invoke<string>("delete_project", { slug }),
   /** Moves a note to the system trash, and returns its name. */
   deleteNote: (path: string) => invoke<string>("delete_note", { path }),
   cutScene: (path: string) => invoke<RelocatedNote>("cut_scene", { path }),

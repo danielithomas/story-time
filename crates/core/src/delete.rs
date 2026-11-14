@@ -1,4 +1,5 @@
-//! Deleting a note, and cutting a scene from its book to its world's scratchpad.
+//! Deleting a note, a chapter, a book or a world, and cutting a scene from its book to its
+//! world's scratchpad.
 //!
 //! Deleting hands the note to a `discard` function: in the app, the system trash, so it can be
 //! restored. A scene comes out of its book's contents first. Links to a deleted note stay as they
@@ -17,8 +18,8 @@ use anyhow::{Context, Result, bail};
 use crate::contents::{self, Spot};
 use crate::home::Home;
 use crate::links::{self, LinkIndex, Moves, Resolution};
-use crate::note::Note;
-use crate::project::{Book, Project};
+use crate::note::{Note, Saved, content_hash, save_section, section, split_frontmatter};
+use crate::project::{BOOKS_HEADING, Book, Project};
 use crate::vault::{Vault, markdown_files};
 
 /// Links to the note at `path` from other notes: how many, and in how many notes.
@@ -204,27 +205,143 @@ fn same_name_in(project: &Project, book: Option<&Book>, path: &Path) -> Result<O
 /// Moves the note at `from` to `to` and rewrites the links that would no longer reach it, or
 /// that it would no longer follow.
 fn relocate(vault: &Vault, from: &Path, to: &Path) -> Result<Relocated> {
-    if to.exists() {
-        bail!("{} already exists", vault.relative(to).display());
-    }
     let name = Note::load(from)?.title();
-    let before = LinkIndex::build(vault)?;
-    let dir = to.parent().context("a note is in a folder")?;
-    fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    fs::rename(from, to).with_context(|| {
-        format!(
-            "moving {} to {}",
-            vault.relative(from).display(),
-            vault.relative(to).display()
-        )
-    })?;
-    let (links, notes) = links::relink(vault, &before, &Moves::one(from, to))?;
+    let (links, notes) = relocate_all(vault, &[(from.to_path_buf(), to.to_path_buf())])?;
     Ok(Relocated {
         path: to.to_path_buf(),
         name,
         links,
         notes,
     })
+}
+
+/// Moves notes, each from the first path to the second, then rewrites the links that would no
+/// longer reach them, or that they would no longer follow, in one pass. Returns how many links
+/// were rewritten, in how many notes.
+fn relocate_all(vault: &Vault, moves: &[(PathBuf, PathBuf)]) -> Result<(usize, usize)> {
+    if let Some((_, to)) = moves.iter().find(|(_, to)| to.exists()) {
+        bail!("{} already exists", vault.relative(to).display());
+    }
+    let before = LinkIndex::build(vault)?;
+    let mut moved = Moves::default();
+    for (from, to) in moves {
+        let dir = to.parent().context("a note is in a folder")?;
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+        fs::rename(from, to).with_context(|| {
+            format!(
+                "moving {} to {}",
+                vault.relative(from).display(),
+                vault.relative(to).display()
+            )
+        })?;
+        moved.to.insert(from.clone(), to.clone());
+    }
+    links::relink(vault, &before, &moved)
+}
+
+/// What deleting a book did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedBook {
+    pub title: String,
+    /// How many of its scenes moved to its world's scratchpad: none if they were deleted too.
+    pub kept: usize,
+}
+
+/// Deletes a book from its world. By default its scenes move to the world's scratchpad first,
+/// keeping their properties, with links to them following; with `with_scenes` they go too. Then
+/// the book's folder (its note, story flow and anything else in it) is handed to `discard`: in the
+/// app, the system trash. Last, the book comes out of the world's `## Books` list. Refused before
+/// anything changes if a scene shares a file name with another note in the world, which the
+/// scratchpad couldn't hold beside it.
+pub fn delete_book(
+    vault: &Vault,
+    project: &Project,
+    book: &Book,
+    with_scenes: bool,
+    discard: impl FnOnce(&Path) -> Result<()>,
+) -> Result<DeletedBook> {
+    let title = book.title();
+    let mut kept = 0;
+    if !with_scenes {
+        let scenes = book.scenes()?;
+        let others: Vec<PathBuf> = markdown_files(&project.dir)?
+            .into_iter()
+            .filter(|path| !path.starts_with(&book.dir))
+            .collect();
+        let mut moves = Vec::new();
+        for scene in &scenes {
+            let path = &scene.note.path;
+            let wanted = stem(path).to_lowercase();
+            if let Some(other) = others
+                .iter()
+                .find(|other| stem(other).to_lowercase() == wanted)
+            {
+                bail!(
+                    "{title}'s scene {} has the same file name as {}, so it can't join the \
+                     world's scratchpad: rename one of them, or delete the scenes too",
+                    scene.title(),
+                    vault.relative(other).display()
+                );
+            }
+            moves.push((
+                path.clone(),
+                project.scratchpad_dir().join(file_name(path)?),
+            ));
+        }
+        relocate_all(vault, &moves)?;
+        kept = moves.len();
+    }
+    discard(&book.dir)
+        .with_context(|| format!("deleting {}", vault.relative(&book.dir).display()))?;
+    unlist(vault, project, &book.slug)?;
+    Ok(DeletedBook { title, kept })
+}
+
+/// Takes the book with file name `slug` out of the world's `## Books` list, leaving every other
+/// line as it was.
+fn unlist(vault: &Vault, project: &Project, slug: &str) -> Result<()> {
+    let path = &project.note.path;
+    let content =
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let Some(lines) = section(split_frontmatter(&content).1, BOOKS_HEADING) else {
+        return Ok(());
+    };
+    let lists_it = |line: &str| {
+        let line = line.trim_start();
+        (line.starts_with(['-', '*', '+']) || line.starts_with(|c: char| c.is_ascii_digit()))
+            && links::links(line).first().is_some_and(|link| {
+                let stem = link.target.rsplit('/').next().unwrap_or_default();
+                stem.trim_end_matches(".md").eq_ignore_ascii_case(slug)
+            })
+    };
+    let kept: Vec<String> = lines
+        .iter()
+        .filter(|line| !lists_it(line))
+        .map(|line| line.to_string())
+        .collect();
+    if kept.len() == lines.len() {
+        return Ok(());
+    }
+    match save_section(path, BOOKS_HEADING, &kept, &content_hash(&content))? {
+        Saved::Written { .. } => Ok(()),
+        Saved::Conflict { .. } => bail!(
+            "{} changed on disk while the book was being deleted: take it out of ## Books there",
+            vault.relative(path).display()
+        ),
+    }
+}
+
+/// Deletes a world, handing its whole folder to `discard` in one piece: in the app, the system
+/// trash, from where it can be restored as it was. Returns its title.
+pub fn delete_project(
+    vault: &Vault,
+    project: &Project,
+    discard: impl FnOnce(&Path) -> Result<()>,
+) -> Result<String> {
+    let title = project.title();
+    discard(&project.dir)
+        .with_context(|| format!("deleting {}", vault.relative(&project.dir).display()))?;
+    Ok(title)
 }
 
 fn file_name(path: &Path) -> Result<&std::ffi::OsStr> {
@@ -506,6 +623,90 @@ mod tests {
         assert_eq!(placed(&book), ["Leaving Home", "Coda"]);
         assert!(reload(&book).contents().unwrap().unplaced.is_empty());
         assert!(contents::delete_chapter(&reload(&book), &reload(&book).hash, 9).is_err());
+    }
+
+    #[test]
+    fn deletes_a_book_keeping_its_scenes_or_with_them() {
+        let (dir, vault) = vault();
+        let (project, one) = project(&vault, "Sample Story");
+        let two = add_book(&vault, &project, &new_book("Second Story"), today()).unwrap();
+        let three = add_book(&vault, &project, &new_book("Third Story"), today()).unwrap();
+        let arrival = scene(&vault, &project, &two, "Arrival");
+        scene(&vault, &project, &two, "Leaving Home");
+        let mara = add_note(&vault, &project, NoteKind::Character, "Mara", today())
+            .unwrap()
+            .path;
+        fs::write(
+            &mara,
+            "---\naliases: [Mara]\n---\nShe arrives in [[arrival|Arrival]].\n",
+        )
+        .unwrap();
+        let trash = dir.path().join("trash");
+        fs::create_dir(&trash).unwrap();
+        let to_trash = |path: &Path| {
+            fs::rename(path, trash.join(path.file_name().unwrap())).map_err(Into::into)
+        };
+        let reloaded = || Project::load(&project.dir).unwrap().unwrap();
+
+        let deleted = delete_book(&vault, &project, &reload(&two), false, to_trash).unwrap();
+        assert_eq!(
+            deleted,
+            DeletedBook {
+                title: "Second Story".into(),
+                kept: 2
+            }
+        );
+        assert!(trash.join("second-story").is_dir() && !two.dir.exists());
+        let kept = project.scratchpad_dir().join("arrival.md");
+        assert!(kept.exists() && project.scratchpad_dir().join("leaving-home.md").exists());
+        assert_eq!(
+            LinkIndex::build(&vault).unwrap().resolve(&mara, "arrival"),
+            Resolution::Found(kept),
+            "links to its scenes follow them"
+        );
+        let books: Vec<String> = reloaded()
+            .books()
+            .unwrap()
+            .iter()
+            .map(Book::title)
+            .collect();
+        assert_eq!(books, ["Sample Story", "Third Story"]);
+        assert!(
+            !reloaded().note.body.contains("second-story"),
+            "out of ## Books"
+        );
+        assert!(arrival.parent().unwrap().parent().unwrap() == two.dir);
+
+        // A scene that would clash in the scratchpad stops it before anything changes: books may
+        // share scene names, but the scratchpad shares the world's.
+        scene(&vault, &project, &one, "Morning");
+        let morning = scene(&vault, &project, &three, "Morning");
+        let clash = delete_book(&vault, &project, &reload(&three), false, |_| {
+            bail!("not reached")
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(clash.contains("same file name"), "{clash}");
+        assert!(morning.exists());
+        assert!(three.dir.exists());
+        let gone = delete_book(&vault, &project, &reload(&three), true, to_trash).unwrap();
+        assert_eq!(gone.kept, 0);
+        assert!(trash.join("third-story/scenes/morning.md").exists());
+
+        let books: Vec<String> = reloaded()
+            .books()
+            .unwrap()
+            .iter()
+            .map(Book::title)
+            .collect();
+        assert_eq!(books, ["Sample Story"]);
+        assert_eq!(
+            delete_project(&vault, &reloaded(), to_trash).unwrap(),
+            "Sample Story"
+        );
+        assert!(!project.dir.exists() && trash.join(project.dir.file_name().unwrap()).is_dir());
+        assert!(one.dir.starts_with(&project.dir));
+        assert!(vault.projects().unwrap().is_empty());
     }
 
     fn project_named(vault: &Vault, title: &str) -> (Project, Book) {
