@@ -3384,6 +3384,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "serde",
+ "serde_json",
  "story-time-core",
  "tempfile",
  "unicode-width",

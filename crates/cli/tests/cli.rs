@@ -403,6 +403,53 @@ fn renames_notes_and_the_links_to_them() {
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("no scene, character"));
 }
 
+#[test]
+fn reports_as_json() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    ok(root, &["init", "--example"]);
+    let json = |args: &[&str]| -> serde_json::Value {
+        let out = ok(root, args);
+        serde_json::from_str(&out).unwrap_or_else(|e| panic!("{args:?}: {e}\n{out}"))
+    };
+    let stats = json(&["stats", "--json"]);
+    let book = &stats["books"][0];
+    assert_eq!(book["title"], "A Tour of Story Time");
+    assert_eq!(book["project"]["slug"], "example-world");
+    assert_eq!(book["form"], "short-story");
+    assert!(book["words"].as_u64().unwrap() > 0);
+    assert_eq!(stats["daily_goal"], 500);
+
+    let world = json(&["stats", "example-world", "--json"]);
+    assert_eq!(world["world_bible"]["characters"], 1);
+    assert_eq!(world["books"][0]["parts"][0]["title"], "Writing");
+
+    let outline = json(&["outline", "--json"]);
+    let scene = &outline["parts"][0]["chapters"][0]["scenes"][0];
+    assert_eq!(scene["title"], "Welcome to the Example");
+    assert_eq!(
+        scene["pov"], "The Writer",
+        "a link shows as the name it shows"
+    );
+    assert_eq!(outline["unplaced"][0]["title"], "A Scene Set Aside");
+
+    assert_eq!(json(&["check", "--json"])["clean"], true);
+    assert_eq!(json(&["today", "--json"])["written"], 0);
+    assert_eq!(
+        json(&["history", "--days", "3", "--json"])["days"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    ok(root, &["idea", "Sample Story: A premise."]);
+    let ideas = json(&["ideas", "--json"]);
+    assert_eq!(ideas["ideas"][0]["name"], "Sample Story");
+    assert_eq!(ideas["ideas"][0]["project"], serde_json::Value::Null);
+    assert!(ok(root, &["ideas"]).contains("Sample Story: A premise."));
+}
+
 // Only Linux honours XDG_DATA_HOME, so elsewhere this would write to the real data folder.
 #[cfg(target_os = "linux")]
 #[test]

@@ -20,6 +20,7 @@ use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
+use crate::json;
 use crate::output::{Align, Table, bar, percent, plural, signed, thousands, wrap};
 
 pub fn init(root: &Path, force: bool, example: bool, now: NaiveDateTime) -> Result<()> {
@@ -214,8 +215,11 @@ pub fn add(
     Ok(())
 }
 
-pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
+pub fn stats_all(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
     let (measured, history) = vault.snapshot(now)?;
+    if json {
+        return json::print(&json::stats(vault, &measured, &history, now.date()));
+    }
     if measured.is_empty() {
         println!("No books yet. Start one with: story-time new \"Title\"");
         return Ok(());
@@ -274,13 +278,38 @@ pub fn stats_all(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     Ok(())
 }
 
-pub fn stats_project(vault: &Vault, cwd: &Path, query: &str, now: NaiveDateTime) -> Result<()> {
+pub fn stats_project(
+    vault: &Vault,
+    cwd: &Path,
+    query: &str,
+    now: NaiveDateTime,
+    json: bool,
+) -> Result<()> {
     let project = vault.find_project(Some(query), cwd)?;
     let (measured, history) = vault.snapshot(now)?;
     let books: Vec<Measured> = measured
         .into_iter()
         .filter(|m| m.project.slug == project.slug)
         .collect();
+    if json {
+        let sizes = json::ProjectSizes {
+            characters: project.notes(NoteKind::Character)?.len(),
+            locations: project.notes(NoteKind::Location)?.len(),
+            world: project.notes(NoteKind::World)?.len(),
+            research: scratchpad::research(&project.research_dir())?.len(),
+        };
+        let scratchpad = Scratchpad::of_project(&project)?;
+        let report = json::project_stats(
+            vault,
+            &project,
+            &books,
+            &history,
+            now.date(),
+            sizes,
+            &scratchpad,
+        );
+        return json::print(&report);
+    }
     if books.is_empty() {
         println!(
             "\n  {} has no books yet. Add one with: story-time new \"Title\" --in {}",
@@ -457,10 +486,19 @@ fn book_stats(vault: &Vault, measured: &Measured, history: &History, now: NaiveD
     );
 }
 
-pub fn outline(vault: &Vault, cwd: &Path, project: Option<&str>, book: Option<&str>) -> Result<()> {
+pub fn outline(
+    vault: &Vault,
+    cwd: &Path,
+    project: Option<&str>,
+    book: Option<&str>,
+    json: bool,
+) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
     let book = project.find_book(book, cwd)?;
     let contents = book.contents()?;
+    if json {
+        return json::print(&json::outline(vault, &project, &book, &contents));
+    }
     println!("\n  {}: outline\n", book.title());
     if contents.scenes().next().is_none() && contents.chapters().next().is_none() {
         println!("  No scenes yet.");
@@ -511,9 +549,13 @@ fn print_scene(scene: &Scene) {
     }
 }
 
-pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
+pub fn today(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
     let (measured, history) = vault.snapshot(now)?;
     let day = now.date();
+    if json {
+        let scratchpads = vault.scratchpads()?;
+        return json::print(&json::today(vault, &measured, &scratchpads, &history, day));
+    }
     let written = history.written_on(day, None);
     let goal = vault.config.daily_goal;
     let progress = written.max(0) as u64;
@@ -562,7 +604,7 @@ pub fn today(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     Ok(())
 }
 
-pub fn history(vault: &Vault, days: u32, now: NaiveDateTime) -> Result<()> {
+pub fn history(vault: &Vault, days: u32, now: NaiveDateTime, json: bool) -> Result<()> {
     let (_, history) = vault.snapshot(now)?;
     let daily = history.daily(None);
     let goal = vault.config.daily_goal as i64;
@@ -575,6 +617,9 @@ pub fn history(vault: &Vault, days: u32, now: NaiveDateTime) -> Result<()> {
         .iter()
         .map(|day| daily.get(day).copied().unwrap_or(0))
         .collect();
+    if json {
+        return json::print(&json::history(vault.config.daily_goal, &range, &written));
+    }
     let scale = written.iter().copied().max().unwrap_or(0).max(goal).max(1) as f64;
     println!();
     for (day, words) in range.iter().zip(&written) {
@@ -664,6 +709,34 @@ pub fn research_add(
     Ok(())
 }
 
+pub fn ideas(vault: &Vault, json: bool) -> Result<()> {
+    let entries = ideas::list_ideas(&ideas::read(vault)?);
+    if json {
+        return json::print(&json::ideas(entries));
+    }
+    if entries.is_empty() {
+        println!("No ideas yet. Capture one with: story-time idea \"Name: description\"");
+        return Ok(());
+    }
+    let projects = vault.projects()?;
+    let mut section = None;
+    for idea in &entries {
+        if section != Some(&idea.section) {
+            println!("\n  {}", idea.section);
+            section = Some(&idea.section);
+        }
+        let started = idea
+            .project
+            .as_ref()
+            .and_then(|slug| projects.iter().find(|project| project.slug == *slug))
+            .map(|project| format!("  → {}", project.title()))
+            .unwrap_or_default();
+        println!("    {}{started}", idea.text);
+    }
+    println!();
+    Ok(())
+}
+
 pub fn idea(vault: &Vault, text: &str, non_fiction: bool) -> Result<()> {
     let section = if non_fiction {
         "Non-Fiction"
@@ -678,9 +751,12 @@ pub fn idea(vault: &Vault, text: &str, non_fiction: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>) -> Result<()> {
+pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>, json: bool) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
     let report = check::check(vault, &project)?;
+    if json {
+        return json::print(&json::check(vault, &project, report));
+    }
     println!("\n  World bible check: {}\n", project.title());
     if report.is_clean() {
         println!("  Nothing to report.");

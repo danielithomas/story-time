@@ -1,6 +1,7 @@
 //! `story-time`: organise, measure and compile the stories on a bookshelf of Markdown files.
 
 mod commands;
+mod json;
 mod output;
 
 use std::env;
@@ -10,7 +11,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use chrono::Local;
 use clap::builder::{PossibleValue, PossibleValuesParser};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use story_time_core::compile::Format;
 use story_time_core::contents::Place;
 use story_time_core::scaffold::{NewBook, NewResearch};
@@ -97,7 +98,11 @@ enum Command {
         unplaced: bool,
     },
     /// Word counts and progress for every book, or scene by scene for one project's books.
-    Stats { project: Option<String> },
+    Stats {
+        project: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Each scene's status, point of view and synopsis, chapter by chapter: a corkboard for the
     /// terminal.
     Outline {
@@ -105,16 +110,28 @@ enum Command {
         /// The book (default: the book you are in, or the project's only one).
         #[arg(short, long)]
         book: Option<String>,
+        #[command(flatten)]
+        output: Output,
     },
     /// Words written today against your daily goal, and your writing streak.
-    Today,
+    Today {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Words written per day.
     History {
         #[arg(long, default_value_t = 14)]
         days: u32,
+        #[command(flatten)]
+        output: Output,
     },
     /// Record word counts without printing anything (for cron jobs or git hooks).
     Snapshot,
+    /// List the ideas in the ideas file, with the project each became.
+    Ideas {
+        #[command(flatten)]
+        output: Output,
+    },
     /// Capture an idea in the ideas file.
     Idea {
         /// The idea, written as "Name: description". Quotes are optional.
@@ -137,7 +154,11 @@ enum Command {
     },
     /// Find world-bible gaps: links to notes that don't exist yet, notes that never appear on the
     /// page, contents that don't match the scenes, and scenes missing a status or synopsis.
-    Check { project: Option<String> },
+    Check {
+        project: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Rename a scene, character, location, world note or research note: its name, its file name
     /// and every link to it change together.
     Rename {
@@ -169,6 +190,14 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+}
+
+/// How a report is printed.
+#[derive(Args)]
+struct Output {
+    /// Print JSON instead, for scripts and other programs.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -316,15 +345,28 @@ fn run(cli: Cli) -> Result<()> {
                 now,
             )
         }
-        Command::Stats { project: None } => commands::stats_all(&vault, now),
+        Command::Stats {
+            project: None,
+            output,
+        } => commands::stats_all(&vault, now, output.json),
         Command::Stats {
             project: Some(project),
-        } => commands::stats_project(&vault, &cwd, &project, now),
-        Command::Outline { project, book } => {
-            commands::outline(&vault, &cwd, project.as_deref(), book.as_deref())
-        }
-        Command::Today => commands::today(&vault, now),
-        Command::History { days } => commands::history(&vault, days, now),
+            output,
+        } => commands::stats_project(&vault, &cwd, &project, now, output.json),
+        Command::Outline {
+            project,
+            book,
+            output,
+        } => commands::outline(
+            &vault,
+            &cwd,
+            project.as_deref(),
+            book.as_deref(),
+            output.json,
+        ),
+        Command::Today { output } => commands::today(&vault, now, output.json),
+        Command::History { days, output } => commands::history(&vault, days, now, output.json),
+        Command::Ideas { output } => commands::ideas(&vault, output.json),
         Command::Snapshot => vault.snapshot(now).map(drop),
         Command::Backup => commands::backup(&vault, now),
         Command::Idea { text, non_fiction } => commands::idea(&vault, &text.join(" "), non_fiction),
@@ -365,7 +407,9 @@ fn run(cli: Cli) -> Result<()> {
             text.as_deref(),
             now,
         ),
-        Command::Check { project } => commands::check(&vault, &cwd, project.as_deref()),
+        Command::Check { project, output } => {
+            commands::check(&vault, &cwd, project.as_deref(), output.json)
+        }
         Command::Rename { note, name } => commands::rename(&vault, &cwd, &note, name.as_deref()),
         Command::Compile {
             project,
