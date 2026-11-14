@@ -75,5 +75,4 @@ Ordered roughly by value for effort:
 
 1. **Desktop app, next steps.** Test the Windows and macOS installers (#13).
 2. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
-3. **Standard manuscript format.** A pandoc reference document so `compile --format docx` produces William Shunn's submission format (12-point serif, double-spaced, header with surname / title / page).
-4. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
+3. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).

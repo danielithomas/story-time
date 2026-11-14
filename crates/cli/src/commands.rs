@@ -919,20 +919,13 @@ pub fn compile(
 ) -> Result<()> {
     let project = vault.find_project(project, cwd)?;
     let book = project.find_book(book, cwd)?;
-    let manuscript = compile::manuscript(&book, vault.config.author.as_deref())?;
-    if manuscript.scenes == 0 {
-        bail!(
-            "{} has no scenes with words in them in its contents yet",
-            book.title()
-        );
-    }
     let out = output.unwrap_or_else(|| {
         vault
             .build_dir()
             .join(&project.slug)
             .join(format!("{}.{}", book.slug, format.key()))
     });
-    compile::export(&manuscript.markdown, &out, format)?;
+    let manuscript = compile::write(&book, &vault.config, format, &out)?;
     println!(
         "Compiled {} ({}, {}) into {}",
         plural(manuscript.chapters as u64, "chapter", "chapters"),

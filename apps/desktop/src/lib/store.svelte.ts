@@ -174,7 +174,13 @@ function applyTheme() {
 }
 
 /** Saves the bookshelf's settings, then shows the new daily goal. */
-export async function saveSettings(settings: { dailyGoal: number; author: string; spelling: string[] }) {
+export async function saveSettings(settings: {
+  dailyGoal: number;
+  author: string;
+  contact: string[];
+  paper: string;
+  spelling: string[];
+}) {
   try {
     app.vault = await api.saveSettings(settings);
     await refreshToday();

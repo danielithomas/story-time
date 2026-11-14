@@ -42,7 +42,7 @@ export const api = {
   /** Returns the copy made, if one was. */
   backUp: (daily: boolean) => invoke<string | null>("back_up", { daily }),
   settings: () => invoke<SettingsInfo>("settings"),
-  saveSettings: (args: { dailyGoal: number; author: string; spelling: string[] }) =>
+  saveSettings: (args: { dailyGoal: number; author: string; contact: string[]; paper: string; spelling: string[] }) =>
     invoke<VaultInfo>("save_settings", args),
   /** `folder` null means Story Time's data folder. */
   setBackup: (on: boolean, folder: string | null) => invoke<SettingsInfo>("set_backup", { on, folder }),

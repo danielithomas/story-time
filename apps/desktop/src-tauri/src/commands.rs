@@ -606,6 +606,10 @@ fn enter(root: &Path, state: &AppState, window: &WebviewWindow) -> CmdResult<Vau
 pub struct SettingsInfo {
     daily_goal: u64,
     author: String,
+    /// Lines under the author's name on a Word manuscript's first page.
+    contact: Vec<String>,
+    /// "a4", "letter", or empty to follow the language.
+    paper: String,
     spelling: Vec<String>,
     backup: bool,
     /// Where this bookshelf's copies go.
@@ -626,6 +630,8 @@ pub async fn settings(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
     Ok(SettingsInfo {
         daily_goal: vault.config.daily_goal,
         author: vault.config.author.clone().unwrap_or_default(),
+        contact: vault.config.contact.clone(),
+        paper: vault.config.paper.clone().unwrap_or_default(),
         spelling: vault.config.spelling.clone().unwrap_or_default(),
         backup: user.backs_up(),
         backup_folder: folder.display().to_string(),
@@ -640,6 +646,8 @@ pub async fn settings(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
 pub async fn save_settings(
     daily_goal: u64,
     author: String,
+    contact: Vec<String>,
+    paper: String,
     spelling: Vec<String>,
     state: State<'_, AppState>,
     window: WebviewWindow,
@@ -653,6 +661,16 @@ pub async fn save_settings(
         .map(|code| toml::Value::String(code.to_string()))
         .collect();
     let spelling = (!spelling.is_empty()).then_some(toml::Value::Array(spelling));
+    let contact: Vec<toml::Value> = contact
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(|line| toml::Value::String(line.to_string()))
+        .collect();
+    let contact = (!contact.is_empty()).then_some(toml::Value::Array(contact));
+    let paper = ["a4", "letter"]
+        .contains(&paper.as_str())
+        .then(|| toml::Value::String(paper.clone()));
     let goal =
         i64::try_from(daily_goal).map_err(|_| "That daily goal is too large.".to_string())?;
     for (key, value) in [
@@ -661,6 +679,8 @@ pub async fn save_settings(
             "author",
             author.map(|author| toml::Value::String(author.to_string())),
         ),
+        ("contact", contact),
+        ("paper", paper),
         ("spelling", spelling),
     ] {
         config::set_bookshelf_setting(&root, key, value).or_message()?;
@@ -1701,18 +1721,11 @@ pub async fn compile_book(
 ) -> CmdResult<CompileResult> {
     let (vault, project, book) = state.book(&slug, book.as_deref())?;
     let format = Format::from_key(&format).ok_or_else(|| format!("unknown format \"{format}\""))?;
-    let manuscript = compile::manuscript(&book, vault.config.author.as_deref()).or_message()?;
-    if manuscript.scenes == 0 {
-        return Err(format!(
-            "{} has no scenes with words in them in its contents yet",
-            book.title()
-        ));
-    }
     let out = vault
         .build_dir()
         .join(&project.slug)
         .join(format!("{}.{}", book.slug, format.key()));
-    compile::export(&manuscript.markdown, &out, format).or_message()?;
+    let manuscript = compile::write(&book, &vault.config, format, &out).or_message()?;
     Ok(CompileResult {
         path: out.display().to_string(),
         chapters: manuscript.chapters,

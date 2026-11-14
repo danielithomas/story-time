@@ -16,6 +16,8 @@
   let settings = $state<SettingsInfo | null>(null);
   let dailyGoal = $state(0);
   let author = $state("");
+  let contact = $state("");
+  let paper = $state("");
   let spelling = $state("");
 
   onMount(async () => {
@@ -23,6 +25,8 @@
       settings = await api.settings();
       dailyGoal = settings.dailyGoal;
       author = settings.author;
+      contact = settings.contact.join("\n");
+      paper = settings.paper;
       spelling = settings.spelling.join(", ");
     } catch (error) {
       toastError(error);
@@ -33,6 +37,8 @@
     void saveSettings({
       dailyGoal: Math.max(0, Math.round(dailyGoal || 0)),
       author,
+      contact: contact.split("\n").map((line) => line.trim()).filter(Boolean),
+      paper,
       spelling: spelling.split(",").map((code) => code.trim()).filter(Boolean),
     });
   }
@@ -86,6 +92,29 @@
           <input bind:value={spelling} placeholder="The system's language" onchange={saveWriting} />
         </label>
         <p class="hint">Languages to check spelling in, as codes such as en_AU or en_GB, separated by commas.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Manuscripts</h2>
+      <p class="muted">
+        A book exported as a Word document is in standard manuscript format, ready to send to editors and agents: your
+        name and these details top left of the first page, the word count top right, and your surname, a word from the
+        title and the page number at the top of every other page.
+      </p>
+      <div class="fields">
+        <label class="field">
+          <span>Contact details</span>
+          <textarea rows="3" bind:value={contact} placeholder="Address, phone, email: a line each" onchange={saveWriting}></textarea>
+        </label>
+        <label class="field">
+          <span>Paper</span>
+          <select bind:value={paper} onchange={saveWriting}>
+            <option value="">Follow the language (Letter in the US and Canada, else A4)</option>
+            <option value="a4">A4</option>
+            <option value="letter">US Letter</option>
+          </select>
+        </label>
       </div>
     </section>
 

@@ -1,4 +1,5 @@
-//! Stitching a book's scenes into one manuscript, and exporting it with pandoc.
+//! Stitching a book's scenes into one manuscript, and exporting it with pandoc. A Word document is
+//! in standard manuscript format, for submissions (`submission.rs`).
 
 use std::fs;
 use std::io::{self, Write};
@@ -9,7 +10,9 @@ use std::sync::LazyLock;
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 
+use crate::config::Config;
 use crate::project::{Book, Scene};
+use crate::submission;
 use crate::text::yaml_escape;
 use crate::words::prose;
 
@@ -123,7 +126,7 @@ pub fn manuscript(book: &Book, author: Option<&str>) -> Result<Manuscript> {
 
 /// A scene's prose, without the title heading its note opens with: the contents give the
 /// manuscript its headings.
-fn scene_text(scene: &Scene) -> String {
+pub(crate) fn scene_text(scene: &Scene) -> String {
     let text = prose(&scene.note.body);
     let mut lines = text.trim().lines().peekable();
     if lines.peek().is_some_and(|line| line.starts_with("# ")) {
@@ -161,21 +164,82 @@ fn paragraphs(text: &str) -> String {
     out
 }
 
-/// Writes the manuscript to `out`: directly for Markdown, otherwise through pandoc.
-pub fn export(markdown: &str, out: &Path, format: Format) -> Result<()> {
+/// Writes `book` as a manuscript in `format` at `out`. A Word document is in standard manuscript
+/// format, for sending to editors and agents; the others have a plain title block. Refused if the
+/// book's contents have no scenes with words in them yet.
+pub fn write(book: &Book, config: &Config, format: Format, out: &Path) -> Result<Manuscript> {
+    let details = submission::Details::of(config);
+    let manuscript = match format {
+        Format::Docx => submission::markdown(book, &details)?,
+        _ => manuscript(book, config.author.as_deref())?,
+    };
+    if manuscript.scenes == 0 {
+        bail!(
+            "{} has no scenes with words in them in its contents yet",
+            book.title()
+        );
+    }
+    if format != Format::Docx {
+        export(&manuscript.markdown, out, format, None)?;
+        return Ok(manuscript);
+    }
+    let reference = submission::reference(
+        &pandoc_data("reference.docx", format)?,
+        &details,
+        &book.title(),
+    )?;
+    let name = out.file_name().unwrap_or_default().to_string_lossy();
+    let reference_path = out.with_file_name(format!(".{name}.reference.docx"));
+    if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::write(&reference_path, reference)
+        .with_context(|| format!("writing {}", reference_path.display()))?;
+    let exported = export(&manuscript.markdown, out, format, Some(&reference_path));
+    fs::remove_file(&reference_path).ok();
+    exported?;
+    Ok(manuscript)
+}
+
+/// One of pandoc's own data files, such as its default reference document.
+fn pandoc_data(name: &str, format: Format) -> Result<Vec<u8>> {
+    let output = match Command::new("pandoc")
+        .args(["--print-default-data-file", name])
+        .output()
+    {
+        Ok(output) => output,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => bail!(
+            "{} output needs pandoc (https://pandoc.org); install it or use --format md",
+            format.key()
+        ),
+        Err(e) => return Err(e).context("starting pandoc"),
+    };
+    if !output.status.success() {
+        bail!(
+            "pandoc failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.stdout)
+}
+
+/// Writes the manuscript to `out`: directly for Markdown, otherwise through pandoc, styled after
+/// `reference` if given.
+pub fn export(markdown: &str, out: &Path, format: Format, reference: Option<&Path>) -> Result<()> {
     if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     if format == Format::Markdown {
         return fs::write(out, markdown).with_context(|| format!("writing {}", out.display()));
     }
-    let mut pandoc = match Command::new("pandoc")
+    let mut command = Command::new("pandoc");
+    command
         .args(["--from", "markdown", "--standalone", "--output"])
-        .arg(out)
-        .stdin(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .arg(out);
+    if let Some(reference) = reference {
+        command.arg("--reference-doc").arg(reference);
+    }
+    let mut pandoc = match command.stdin(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             bail!(

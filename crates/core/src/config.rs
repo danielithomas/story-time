@@ -17,6 +17,16 @@ pub const FORMAT: u32 = 1;
 
 /// Introduces the `format` setting in the config file.
 const FORMAT_COMMENT: &str = "# The layout of this bookshelf, so story-time reads it right. `story-time upgrade` changes it.";
+/// Documents the `contact` and `paper` settings, which story-time 0.1's config file lacks.
+const SUBMISSION_SETTINGS: [&str; 6] = [
+    "",
+    "# For a manuscript in standard format (`compile --format docx`): the lines under your name on its",
+    "# first page, such as your address, phone and email, and its paper, \"a4\" or \"letter\". The paper",
+    "# defaults to letter in the United States and Canada and A4 elsewhere.",
+    "# contact = [\"12 Example Street, Sydney NSW 2000\", \"you@example.com\"]",
+    "# paper = \"a4\"",
+];
+
 /// Introduces the `scratchpad` setting in the config file.
 const SCRATCHPAD_COMMENT: &str =
     "# The bookshelf's scratchpad: fragments not tied to any world (`story-time scrap add`).";
@@ -58,6 +68,12 @@ templates_dir = "templates"
 # Name printed on compiled manuscripts.
 # author = "Your Name"
 
+# For a manuscript in standard format (`compile --format docx`): the lines under your name on its
+# first page, such as your address, phone and email, and its paper, "a4" or "letter". The paper
+# defaults to letter in the United States and Canada and A4 elsewhere.
+# contact = ["12 Example Street, Sydney NSW 2000", "you@example.com"]
+# paper = "a4"
+
 # Spellcheck language(s) for the desktop app's editor, as language_COUNTRY codes.
 # Defaults to the system language.
 # spelling = ["en_AU"]
@@ -74,6 +90,10 @@ pub struct Config {
     pub scratchpad: String,
     pub templates_dir: String,
     pub author: Option<String>,
+    /// Lines under the author's name on a submission's first page: address, phone, email.
+    pub contact: Vec<String>,
+    /// "a4" or "letter" for a submission; unset, it follows the spelling languages or locale.
+    pub paper: Option<String>,
     pub spelling: Option<Vec<String>>,
 }
 
@@ -88,6 +108,8 @@ impl Default for Config {
             scratchpad: "scratchpad".to_string(),
             templates_dir: "templates".to_string(),
             author: None,
+            contact: Vec::new(),
+            paper: None,
             spelling: None,
         }
     }
@@ -168,6 +190,21 @@ pub fn upgraded_config(text: &str) -> String {
             block.push("");
         }
         lines.splice(at..at, block.into_iter().map(String::from));
+    }
+    let mentions = |key: &str| {
+        lines.iter().any(|line| {
+            let line = line.trim_start_matches(['#', ' ']);
+            line.split_once('=').is_some_and(|(k, _)| k.trim() == key)
+        })
+    };
+    if !mentions("contact") && !mentions("paper") {
+        let author = lines.iter().position(|line| {
+            let line = line.trim_start_matches(['#', ' ']);
+            line.split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "author")
+        });
+        let at = author.map_or(lines.len(), |i| i + 1);
+        lines.splice(at..at, SUBMISSION_SETTINGS.map(String::from));
     }
     let format = format!("format = {FORMAT}");
     match find(&lines, "format") {
@@ -289,7 +326,21 @@ fn with_setting(text: &str, key: &str, value: Option<&toml::Value>) -> String {
             let at = lines.iter().position(|l| sets(l));
             match at.or_else(|| lines.iter().position(|l| suggests(l))) {
                 Some(i) => lines[i] = line,
-                None => lines.insert(0, line),
+                // A new key goes after the others, before any [table] so it stays top-level.
+                None => {
+                    let table = lines.iter().position(|l| l.trim_start().starts_with('['));
+                    let end = table.unwrap_or(lines.len());
+                    let last = lines[..end].iter().rposition(|l| !l.trim().is_empty());
+                    let at = last.map_or(0, |i| i + 1);
+                    let mut new = vec![line];
+                    if at > 0 {
+                        new.insert(0, String::new());
+                    }
+                    if lines.get(at).is_some_and(|next| !next.trim().is_empty()) {
+                        new.push(String::new());
+                    }
+                    lines.splice(at..at, new);
+                }
             }
             // Any other line setting it, such as an old `vault`, goes.
             let mut first = true;
@@ -329,7 +380,16 @@ mod tests {
         );
         assert_eq!(
             with_setting(text, "backup_folder", Some(&shelf)),
-            "backup_folder = \"/stories\"\n# mine\nvault = \"/old\"\nbackup = true\n"
+            "# mine\nvault = \"/old\"\nbackup = true\n\nbackup_folder = \"/stories\"\n"
+        );
+        assert_eq!(
+            with_setting(
+                "a = 1\n\n[table]\nb = 2\n",
+                "c",
+                Some(&toml::Value::Integer(3))
+            ),
+            "a = 1\n\nc = 3\n\n[table]\nb = 2\n",
+            "before any table, so it stays top-level"
         );
         assert_eq!(
             with_setting(text, "backup", None),

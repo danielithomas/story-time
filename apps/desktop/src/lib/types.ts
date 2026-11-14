@@ -12,6 +12,10 @@ export interface VaultInfo {
 export interface SettingsInfo {
   dailyGoal: number;
   author: string;
+  /** Lines under the author's name on a Word manuscript's first page. */
+  contact: string[];
+  /** "a4", "letter", or "" to follow the language. */
+  paper: string;
   spelling: string[];
   backup: boolean;
   /** Where this bookshelf's copies go. */
