@@ -115,6 +115,14 @@ export interface RenamedNote {
   links: number;
   notes: number;
   sameName: string | null;
+  /** What the note is ("project" and "book" move a folder), and its world and book before and now. */
+  kind: NoteKind;
+  oldProject: string | null;
+  oldBook: string | null;
+  project: string | null;
+  book: string | null;
+  /** Where the open note is now, if it moved with the rename. */
+  openNow: string | null;
 }
 
 export interface SceneRef extends NoteRef {

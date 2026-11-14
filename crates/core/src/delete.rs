@@ -16,7 +16,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::contents::{self, Spot};
 use crate::home::Home;
-use crate::links::{self, LinkIndex, Resolution};
+use crate::links::{self, LinkIndex, Moves, Resolution};
 use crate::note::Note;
 use crate::project::{Book, Project};
 use crate::vault::{Vault, markdown_files};
@@ -218,7 +218,7 @@ fn relocate(vault: &Vault, from: &Path, to: &Path) -> Result<Relocated> {
             vault.relative(to).display()
         )
     })?;
-    let (links, notes) = links::relink(vault, &before, from, to, &[], &name)?;
+    let (links, notes) = links::relink(vault, &before, &Moves::one(from, to))?;
     Ok(Relocated {
         path: to.to_path_buf(),
         name,

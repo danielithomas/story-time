@@ -1167,19 +1167,41 @@ pub struct RenamedNote {
     notes: usize,
     /// Another note with the same file name, which makes bare links to it ambiguous in Obsidian.
     same_name: Option<String>,
+    /// What the note is ("project" and "book" move a folder), and the project and book it
+    /// belonged to before and belongs to now.
+    kind: String,
+    old_project: Option<String>,
+    old_book: Option<String>,
+    project: Option<String>,
+    book: Option<String>,
+    /// Where the open note is now, if it moved with the rename.
+    open_now: Option<String>,
 }
 
-/// Renames a scene, world-bible note or research note: its name, its file name and every link to
-/// it. With no name, it keeps its name and its file is renamed to match.
+/// Renames a note: a scene, world-bible note or research note, or a book or world through its own
+/// note, which renames its folder too. Its name, its file name and every link to it change
+/// together. With no name, it keeps its name and its file is renamed to match. `open` is the note
+/// open in the editor, so the interface can follow it if it moved.
 #[tauri::command]
 pub async fn rename_note(
     path: String,
     name: Option<String>,
+    open: Option<String>,
     state: State<'_, AppState>,
 ) -> CmdResult<RenamedNote> {
     let vault = state.vault()?;
     let path = note_path(&vault, &path)?;
+    let open = open.and_then(|open| Path::new(&open).canonicalize().ok());
     let renamed = rename::rename(&vault, &path, name.as_deref()).or_message()?;
+    let (_, old_project, old_book) = classify(&vault, &path);
+    let (kind, project, book) = classify(&vault, &renamed.path);
+    let open_now = open.and_then(|open| {
+        renamed
+            .moved
+            .iter()
+            .find(|(from, _)| *from == open)
+            .map(|(_, to)| to.display().to_string())
+    });
     Ok(RenamedNote {
         path: renamed.path.display().to_string(),
         name: renamed.name,
@@ -1188,6 +1210,12 @@ pub async fn rename_note(
         same_name: renamed
             .same_name
             .map(|path| vault.relative(&path).display().to_string()),
+        kind,
+        old_project,
+        old_book,
+        project,
+        book,
+        open_now,
     })
 }
 

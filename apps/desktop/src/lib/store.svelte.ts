@@ -422,22 +422,33 @@ async function added(add: () => Promise<{ path: string; name: string; sameName: 
 }
 
 /**
- * Renames a scene, world-bible note or research note: its name, its file name and every link to it change together.
- * With no name, its file is renamed to match its name. Returns whether it was renamed.
+ * Renames a note: its name, its file name and every link to it change together. A book's or world's own note renames
+ * the book or world, folder and all, and the app follows it. With no name, its file is renamed to match its name.
+ * Returns whether it was renamed.
  */
 export async function renameNote(path: string, name: string | null): Promise<boolean> {
   if (!(await settle())) return false;
   try {
-    const renamed = await api.renameNote(path, name);
-    if (app.slug) app.tree = await api.projectTree(app.slug, app.book);
     const open = app.doc;
-    if (open?.path === path) {
-      setDoc(await api.readNote(renamed.path));
-      if (app.slug) remember(`note:${app.slug}`, renamed.path);
-    } else if (open && renamed.notes) {
-      // The open note may have linked to the renamed one, and so have changed on disk.
-      const fresh = await api.readNote(open.path);
-      if (fresh.hash !== open.hash && app.doc?.path === open.path && !hasPending()) setDoc(fresh);
+    const renamed = await api.renameNote(path, name, open?.path ?? null);
+    if ((renamed.kind === "project" || renamed.kind === "book") && app.slug === renamed.oldProject) {
+      // The open world, or its open book, has a new folder.
+      await loadProjects();
+      app.slug = renamed.project;
+      if (renamed.kind === "book" && app.book === renamed.oldBook) app.book = renamed.book;
+      if (app.slug) remember("project", app.slug);
+      if (app.slug && app.book) remember(`book:${app.slug}`, app.book);
+    } else if (renamed.kind === "project" || renamed.kind === "book") {
+      await loadProjects();
+    }
+    if (app.slug) app.tree = await api.projectTree(app.slug, app.book);
+    if (open && app.doc?.path === open.path && !hasPending()) {
+      // The open note may have moved, or linked to the renamed one and so changed on disk.
+      const fresh = await api.readNote(renamed.openNow ?? open.path);
+      if (fresh.path !== open.path || fresh.hash !== open.hash) {
+        setDoc(fresh);
+        if (app.slug) remember(`note:${app.slug}`, fresh.path);
+      }
     }
     const file = renamed.path.split(/[\\/]/).pop();
     const done = name === null ? `Renamed the file to ${file}.` : `Renamed to ${renamed.name}.`;

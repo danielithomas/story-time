@@ -87,7 +87,8 @@ export const api = {
     invoke<DeletedChapter>("delete_chapter", { slug, book, baseHash, chapter, withScenes }),
   /** Undoes the book's latest move, and returns what moved back, or null if there was none to undo. */
   undoMove: (slug: string, book: string | null) => invoke<string | null>("undo_move", { slug, book }),
-  renameNote: (path: string, name: string | null) => invoke<RenamedNote>("rename_note", { path, name }),
+  renameNote: (path: string, name: string | null, open: string | null) =>
+    invoke<RenamedNote>("rename_note", { path, name, open }),
   linksToNote: (path: string) => invoke<NoteLinks>("links_to_note", { path }),
   /** Moves a note to the system trash, and returns its name. */
   deleteNote: (path: string) => invoke<string>("delete_note", { path }),

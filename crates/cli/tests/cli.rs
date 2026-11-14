@@ -371,6 +371,21 @@ fn renames_notes_and_the_links_to_them() {
     let outline = ok(root, &["outline"]);
     assert!(outline.contains("Notes to Myself"), "{outline}");
 
+    let book = ok(root, &["rename", "A Tour of Story Time", "A Grand Tour"]);
+    assert!(
+        book.contains("example-world/books/a-grand-tour/a-grand-tour.md"),
+        "{book}"
+    );
+    let world = ok(
+        root,
+        &["rename", "example-world/example-world.md", "The Example"],
+    );
+    assert!(world.contains("the-example/the-example.md"), "{world}");
+    let check = ok(root, &["check"]);
+    assert!(check.contains("Nothing to report."), "{check}");
+    let outline = ok(root, &["outline"]);
+    assert!(outline.contains("A Grand Tour"), "{outline}");
+
     let nothing = ok(root, &["rename", "the-author"]);
     assert!(nothing.contains("Nothing to rename"), "{nothing}");
     let taken = run(root, &["rename", "The Author", "The Binder"]);
@@ -378,8 +393,12 @@ fn renames_notes_and_the_links_to_them() {
         taken.status.success(),
         "a character may share a location's name"
     );
-    let refused = run(root, &["rename", "example-world/example-world.md", "Other"]);
-    assert!(!refused.status.success());
+    let flow = "the-example/books/a-grand-tour/a-grand-tour-flow.md";
+    let refused = run(root, &["rename", flow, "Other"]);
+    assert!(
+        !refused.status.success(),
+        "a story flow is named after its book"
+    );
     let unknown = run(root, &["rename", "Nobody", "Somebody"]);
     assert!(String::from_utf8_lossy(&unknown.stderr).contains("no scene, character"));
 }

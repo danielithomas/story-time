@@ -220,20 +220,14 @@
       {@render nameField("Name")}
       {@render otherNamesField("Other names")}
     {:else if doc.kind === "project"}
-      <label class="field">
-        <span>Title</span>
-        <input value={text("title")} onchange={(e) => setProperty("title", e.currentTarget.value)} />
-      </label>
+      {@render nameField("Title")}
       <label class="field">
         <span>Genres</span>
         <input value={text("genre")} placeholder="Space opera, mystery…" onchange={(e) => setList("genre", e.currentTarget.value)} />
       </label>
       <p class="hint">The world every book in this project shares. Separate genres with commas.</p>
     {:else if doc.kind === "book"}
-      <label class="field">
-        <span>Title</span>
-        <input value={text("title")} onchange={(e) => setProperty("title", e.currentTarget.value)} />
-      </label>
+      {@render nameField("Title")}
       <label class="field">
         <span>Status</span>
         <select value={text("status")} onchange={(e) => setProperty("status", e.currentTarget.value)}>

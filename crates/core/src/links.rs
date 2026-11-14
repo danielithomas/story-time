@@ -222,33 +222,52 @@ impl LinkIndex {
     }
 }
 
-/// After the note at `from` has moved to `to` (been renamed, or moved to another folder), rewrites
-/// the links that no longer reach what they meant: every link to the note, and the note's own
-/// links that don't reach their notes from where it is now. `before` indexes the bookshelf as it
-/// was. Link text showing one of `old_names` shows `name`; other text is kept, and a link that
-/// still works is left as written. The ideas file and templates are never edited. Returns how many
-/// links were rewritten, in how many notes.
-pub(crate) fn relink(
-    vault: &Vault,
-    before: &LinkIndex,
-    from: &Path,
-    to: &Path,
-    old_names: &[String],
-    name: &str,
-) -> Result<(usize, usize)> {
-    let relinker = Relinker {
+/// Notes that moved, and notes whose names changed, for [`relink`].
+#[derive(Debug, Default)]
+pub(crate) struct Moves {
+    /// Where each moved note was, and where it is now. A note renamed in place maps to itself.
+    pub to: HashMap<PathBuf, PathBuf>,
+    /// For notes whose names changed, by where they are now: their old names, and the new one.
+    pub names: HashMap<PathBuf, (Vec<String>, String)>,
+}
+
+impl Moves {
+    /// One note, moved from `from` to `to`.
+    pub(crate) fn one(from: &Path, to: &Path) -> Moves {
+        let mut moves = Moves::default();
+        moves.to.insert(from.to_path_buf(), to.to_path_buf());
+        moves
+    }
+
+    /// Records that the note now at `path` was called one of `old_names`, and is now `name`.
+    pub(crate) fn named(mut self, path: &Path, old_names: Vec<String>, name: &str) -> Moves {
+        self.names
+            .insert(path.to_path_buf(), (old_names, name.to_string()));
+        self
+    }
+}
+
+/// After notes have moved (been renamed, or moved to another folder), rewrites the links that no
+/// longer reach what they meant: every link to a moved note, and the moved notes' own links that
+/// don't reach their notes from where they are now. `before` indexes the bookshelf as it was.
+/// Link text showing a renamed note's old name shows its new one; other text is kept, and a link
+/// that still works is left as written. The ideas file and templates are never edited. Returns how
+/// many links were rewritten, in how many notes.
+pub(crate) fn relink(vault: &Vault, before: &LinkIndex, moves: &Moves) -> Result<(usize, usize)> {
+    let mut relinker = Relinker {
         before,
         after: &LinkIndex::build(vault)?,
-        from,
-        to,
-        old_names,
-        name,
+        moves,
+        came_from: moves
+            .to
+            .iter()
+            .map(|(from, to)| (to.clone(), from.clone()))
+            .collect(),
         titles: HashMap::new(),
     };
     let (mut links, mut notes) = (0, 0);
     let ideas = vault.ideas_path();
     let templates = vault.templates_dir();
-    let mut relinker = relinker;
     for file in markdown_files(&vault.root)? {
         if file == ideas || file.starts_with(&templates) {
             continue;
@@ -268,20 +287,20 @@ pub(crate) fn relink(
 struct Relinker<'a> {
     before: &'a LinkIndex,
     after: &'a LinkIndex,
-    from: &'a Path,
-    to: &'a Path,
-    old_names: &'a [String],
-    name: &'a str,
-    /// Names of the notes the moved note links to, read as needed.
+    moves: &'a Moves,
+    /// Where each moved note was, by where it is now.
+    came_from: HashMap<PathBuf, PathBuf>,
+    /// Names of the notes the moved notes link to, read as needed.
     titles: HashMap<PathBuf, Option<String>>,
 }
 
 impl Relinker<'_> {
     /// `content`, the text of the note at `file`, with its links rewritten, and how many were.
     fn relink(&mut self, file: &Path, content: &str) -> (String, usize) {
-        let moved = file == self.to;
-        // The moved note's links are resolved from where it was.
-        let was = if moved { self.from } else { file };
+        // A moved note's links are resolved from where it was.
+        let was = self.came_from.get(file).cloned();
+        let moved = was.is_some();
+        let was = was.unwrap_or_else(|| file.to_path_buf());
         let frontmatter_end = match split_frontmatter(content) {
             (Some(yaml), _) => 4 + yaml.len(),
             (None, _) => 0,
@@ -294,15 +313,12 @@ impl Relinker<'_> {
             let (target, rest) =
                 written.split_at(written.find(['#', '^']).unwrap_or(written.len()));
             let target = target.trim();
-            let Resolution::Found(meant) = self.before.resolve(was, target) else {
+            let Resolution::Found(meant) = self.before.resolve(&was, target) else {
                 return whole.to_string();
             };
-            let to_moved = meant == self.from;
-            let now = if to_moved {
-                self.to.to_path_buf()
-            } else {
-                meant
-            };
+            let now = self.moves.to.get(&meant).cloned();
+            let to_moved = now.is_some();
+            let now = now.unwrap_or(meant);
             let is_note = now.extension().is_some_and(|ext| ext == "md");
             if !is_note || !(to_moved || moved) {
                 return whole.to_string();
@@ -320,24 +336,22 @@ impl Relinker<'_> {
             };
             let retargeted = new_target != target;
             let embed = content[..start].ends_with('!');
+            let renamed = self.moves.names.get(&now);
             let text = match c.get(2).map(|text| text.as_str()) {
                 Some(text)
-                    if to_moved
-                        && self
-                            .old_names
-                            .iter()
-                            .any(|old| text.trim().eq_ignore_ascii_case(old)) =>
+                    if renamed.is_some_and(|(old, _)| {
+                        old.iter().any(|old| text.trim().eq_ignore_ascii_case(old))
+                    }) =>
                 {
-                    Some(self.name.to_string())
+                    renamed.map(|(_, name)| name.clone())
                 }
                 Some(text) => Some(text.to_string()),
                 None if embed || !retargeted => None,
                 // A retargeted link shows the note's name, unless the target already does.
                 None => {
-                    let shown = if to_moved {
-                        Some(self.name.to_string())
-                    } else {
-                        self.title(&now)
+                    let shown = match renamed {
+                        Some((_, name)) => Some(name.clone()),
+                        None => self.title(&now),
                     };
                     shown.filter(|shown| *shown != new_target)
                 }

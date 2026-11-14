@@ -131,6 +131,19 @@ pub struct IdeaEntry {
 static PROJECT_LINK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\s*→\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s*$").unwrap());
 
+/// An idea's text without the links to the project it became, and that project: the last link,
+/// since renaming a project appends a link to its new name.
+fn without_project_links(item: &str) -> (String, Option<String>) {
+    let mut text = item.trim().to_string();
+    let mut project = None;
+    while let Some(link) = PROJECT_LINK.captures(&text) {
+        project.get_or_insert_with(|| link[1].trim().to_string());
+        let start = link.get(0).expect("a match").start();
+        text.truncate(start);
+    }
+    (text.trim().to_string(), project)
+}
+
 /// Every list item in the ideas file, with the heading it belongs to.
 pub fn list_ideas(content: &str) -> Vec<IdeaEntry> {
     let mut section = String::new();
@@ -143,9 +156,7 @@ pub fn list_ideas(content: &str) -> Vec<IdeaEntry> {
         let Some(item) = LIST_ITEM.captures(line).and_then(|c| c.get(3)) else {
             continue;
         };
-        let item = item.as_str().trim();
-        let project = PROJECT_LINK.captures(item).map(|c| c[1].trim().to_string());
-        let text = PROJECT_LINK.replace(item, "").trim().to_string();
+        let (text, project) = without_project_links(item.as_str());
         if text.is_empty() {
             continue;
         }
@@ -214,6 +225,26 @@ pub fn link_idea(content: &str, line: usize, link: &str) -> String {
         out.push(String::new());
     }
     out.join("\n")
+}
+
+/// After the project at `old` (its file name, as ideas link to it) was renamed, appends `link`, a
+/// link to it under its new name, to each idea that became it. Nothing is removed or reworded, so
+/// the old link stays before the new one. Returns the new text and how many ideas changed.
+pub fn link_renamed_project(content: &str, old: &str, link: &str) -> (String, usize) {
+    let mut content = content.to_string();
+    let lines: Vec<usize> = content
+        .lines()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            let item = LIST_ITEM.captures(line)?.get(3)?;
+            let (_, project) = without_project_links(item.as_str());
+            project.filter(|p| p.eq_ignore_ascii_case(old)).map(|_| i)
+        })
+        .collect();
+    for &line in &lines {
+        content = link_idea(&content, line, link);
+    }
+    (content, lines.len())
 }
 
 #[cfg(test)]
@@ -287,6 +318,28 @@ mod tests {
                 idea.name
             );
         }
+    }
+
+    #[test]
+    fn follows_a_renamed_project_by_adding_to_its_line() {
+        let linked = link_idea(IDEAS, 7, "[[sample-story-world|Sample Story]]");
+        let (renamed, count) =
+            link_renamed_project(&linked, "sample-story-world", "[[the-deep|The Deep]]");
+        assert_eq!(count, 1);
+        assert!(renamed.contains(
+            "1. Sample Story: A premise, with a catch. → [[sample-story-world|Sample Story]] → [[the-deep|The Deep]]\n"
+        ));
+        let idea = &list_ideas(&renamed)[0];
+        assert_eq!(idea.project.as_deref(), Some("the-deep"));
+        assert_eq!(idea.text, "Sample Story: A premise, with a catch.");
+        assert_eq!(
+            find_idea(&renamed, "Sample Story").unwrap().premise,
+            "A premise, with a catch."
+        );
+        assert_eq!(
+            link_renamed_project(&renamed, "elsewhere", "[[x|X]]"),
+            (renamed.clone(), 0)
+        );
     }
 
     #[test]
