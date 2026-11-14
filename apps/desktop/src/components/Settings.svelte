@@ -8,8 +8,10 @@
     chooseVault,
     saveSettings,
     setTheme,
+    setTypewriter,
     toastError,
     type Theme,
+    type Typewriter,
   } from "../lib/store.svelte";
   import type { SettingsInfo } from "../lib/types";
 
@@ -65,6 +67,12 @@
     { key: "system", label: "Same as the system" },
     { key: "light", label: "Light" },
     { key: "dark", label: "Dark" },
+  ];
+
+  const TYPEWRITER: { key: Typewriter; label: string }[] = [
+    { key: "focus", label: "In focus mode" },
+    { key: "always", label: "Always" },
+    { key: "off", label: "Off" },
   ];
 </script>
 
@@ -166,6 +174,15 @@
           {/each}
         </select>
       </label>
+      <label class="field narrow">
+        <span>Typewriter scrolling</span>
+        <select value={app.typewriter} onchange={(e) => setTypewriter(e.currentTarget.value as Typewriter)}>
+          {#each TYPEWRITER as option (option.key)}
+            <option value={option.key}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+      <p class="hint">Keeps the line you're writing in the middle of the window, so your eyes stay in one place.</p>
     </section>
   {/if}
 </div>

@@ -36,6 +36,10 @@ export type View = "write" | "board" | "progress" | "check" | "ideas" | "setting
 export type Theme = "system" | "light" | "dark";
 const THEME_KEY = "story-time:theme";
 
+/** When the line being written stays in the middle of the window. Kept for this computer only. */
+export type Typewriter = "focus" | "always" | "off";
+const TYPEWRITER_KEY = "story-time:typewriter";
+
 export const VIEWS: { key: View; label: string; needsProject: boolean }[] = [
   { key: "write", label: "Write", needsProject: true },
   { key: "board", label: "Board", needsProject: true },
@@ -56,6 +60,7 @@ interface Toast {
 export const app = $state({
   ready: false,
   theme: (localStorage.getItem(THEME_KEY) ?? "system") as Theme,
+  typewriter: (localStorage.getItem(TYPEWRITER_KEY) ?? "focus") as Typewriter,
   vault: null as VaultInfo | null,
   /** The welcome screen's form for starting a bookshelf is showing. */
   starting: false,
@@ -166,6 +171,11 @@ export function setTheme(theme: Theme) {
   app.theme = theme;
   localStorage.setItem(THEME_KEY, theme);
   applyTheme();
+}
+
+export function setTypewriter(typewriter: Typewriter) {
+  app.typewriter = typewriter;
+  localStorage.setItem(TYPEWRITER_KEY, typewriter);
 }
 
 function applyTheme() {

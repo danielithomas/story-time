@@ -11,6 +11,11 @@
     return () => editor?.destroy();
   });
 
+  // Typewriter scrolling, in focus mode or always, as Settings says.
+  $effect(() => {
+    editor?.setTypewriter(app.typewriter === "always" || (app.typewriter === "focus" && app.focus));
+  });
+
   // Load the note whenever a different one is opened (or reloaded from disk).
   $effect(() => {
     void app.docVersion;
@@ -45,7 +50,7 @@
 <section class="writing" class:focus={app.focus}>
   {#if app.saveState === "conflict"}
     <div class="conflict" role="alert">
-      <span>This note was changed outside Story Time (in Obsidian or by sync) since you opened it.</span>
+      <span>This note was changed outside Story Time (by a sync service, say, or on another computer) since you opened it.</span>
       <button class="btn" onclick={takeTheirs}>Use the other version</button>
       <button class="btn primary" onclick={keepMine}>Keep mine</button>
     </div>

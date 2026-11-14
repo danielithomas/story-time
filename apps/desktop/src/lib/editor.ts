@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { search, searchKeymap } from "@codemirror/search";
-import { EditorState, type Range } from "@codemirror/state";
+import { Compartment, EditorState, type Range, type Transaction } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -63,6 +63,25 @@ const marks = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
+/**
+ * Typewriter scrolling: whatever moves the caret from the keyboard (typing, deleting, undoing, moving the cursor)
+ * also scrolls its line to the middle of the window, so the eyes stay in one place. Clicks and drags with the mouse
+ * don't, so the text never jumps under the pointer. The scroll rides along with the change itself.
+ */
+const fromKeyboard = (tr: Transaction) =>
+  ["input", "delete", "undo", "redo"].some((event) => tr.isUserEvent(event)) ||
+  (tr.isUserEvent("select") && !tr.isUserEvent("select.pointer"));
+
+const typewriter = [
+  EditorState.transactionExtender.of((tr) =>
+    (tr.docChanged || tr.selection) && fromKeyboard(tr)
+      ? { effects: EditorView.scrollIntoView(tr.newSelection.main.head, { y: "center" }) }
+      : null,
+  ),
+  // Room above the first line too, so it starts at the same height.
+  EditorView.contentAttributes.of({ class: "st-typewriter" }),
+];
+
 const theme = EditorView.theme({
   "&": { height: "100%", fontSize: "var(--editor-size)", color: "var(--text)", backgroundColor: "transparent" },
   "&.cm-focused": { outline: "none" },
@@ -74,6 +93,7 @@ const theme = EditorView.theme({
     padding: "3.5rem 2rem 45vh",
     caretColor: "var(--accent)",
   },
+  ".cm-content.st-typewriter": { paddingTop: "45vh" },
   ".cm-line": { padding: "0" },
   ".cm-placeholder": { color: "var(--muted)", fontStyle: "italic" },
   ".st-comment": {
@@ -93,12 +113,17 @@ const theme = EditorView.theme({
 export interface ProseEditor {
   /** Replaces the text, starting a fresh undo history. */
   load(text: string): void;
+  /** Turns typewriter scrolling on or off. */
+  setTypewriter(on: boolean): void;
   focus(): void;
   destroy(): void;
 }
 
 export function createEditor(parent: HTMLElement, onChange: (text: string) => void): ProseEditor {
-  const extensions = [
+  const typewriting = new Compartment();
+  let typewriterOn = false;
+  const extensions = () => [
+    typewriting.of(typewriterOn ? typewriter : []),
     history(),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     search({ top: true }),
@@ -113,10 +138,17 @@ export function createEditor(parent: HTMLElement, onChange: (text: string) => vo
       if (update.docChanged) onChange(update.state.doc.toString());
     }),
   ];
-  const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions }) });
+  const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions() }) });
+  const centre = () => view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "center" }) });
   return {
     load(text) {
-      view.setState(EditorState.create({ doc: text, extensions }));
+      view.setState(EditorState.create({ doc: text, extensions: extensions() }));
+    },
+    setTypewriter(on) {
+      if (on === typewriterOn) return;
+      typewriterOn = on;
+      view.dispatch({ effects: typewriting.reconfigure(on ? typewriter : []) });
+      if (on) requestAnimationFrame(centre);
     },
     focus() {
       view.focus();
