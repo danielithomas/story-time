@@ -23,6 +23,7 @@ import type {
   ProjectSummary,
   ProjectTree,
   Recorded,
+  SyncedInfo,
   PropertyValue,
   SaveResult,
   ScenePlace,
@@ -30,6 +31,7 @@ import type {
   SettingsInfo,
   TodayInfo,
   VaultInfo,
+  WaitingNote,
 } from "./types";
 
 export const api = {
@@ -50,6 +52,16 @@ export const api = {
   setBackup: (on: boolean, folder: string | null) => invoke<SettingsInfo>("set_backup", { on, folder }),
   setKeepHistory: (on: boolean) => invoke<SettingsInfo>("set_keep_history", { on }),
   recordHistory: () => invoke<Recorded | null>("record_history"),
+  connectSync: (address: string) => invoke<SyncedInfo>("connect_sync", { address }),
+  disconnectSync: () => invoke<SettingsInfo>("disconnect_sync"),
+  syncFetch: () => invoke<void>("sync_fetch"),
+  syncMerge: () => invoke<SyncedInfo>("sync_merge"),
+  syncPush: () => invoke<boolean>("sync_push"),
+  pushInBackground: () => invoke<void>("push_in_background"),
+  waitingNotes: () => invoke<WaitingNote[]>("waiting_notes"),
+  otherVersion: (path: string) => invoke<string>("other_version", { path }),
+  decideVersion: (path: string, useOther: boolean) => invoke<void>("decide_version", { path, useOther }),
+  cloneBookshelf: (address: string, place: string) => invoke<VaultInfo>("clone_bookshelf", { address, place }),
   choices: () => invoke<Choices>("choices"),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   projectTree: (slug: string, book: string | null) => invoke<ProjectTree>("project_tree", { slug, book }),

@@ -26,6 +26,7 @@ use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
 use story_time_core::scratchpad::{self, Scratchpad};
 use story_time_core::structures::{self, STRUCTURES};
+use story_time_core::sync;
 use story_time_core::text::thousands;
 use story_time_core::undo::Undo;
 use story_time_core::upgrade;
@@ -118,6 +119,8 @@ pub struct VaultInfo {
     in_git: bool,
     /// The vault keeps a history, which the app records a few minutes after writing stops.
     keep_history: bool,
+    /// Where the vault syncs with other computers, if it does.
+    sync_address: Option<String>,
 }
 
 fn vault_info(vault: &Vault) -> VaultInfo {
@@ -132,6 +135,7 @@ fn vault_info(vault: &Vault) -> VaultInfo {
         needs_upgrade: vault.config.needs_upgrade(),
         in_git: git::in_repository(&vault.root),
         keep_history: vault.config.keep_history,
+        sync_address: sync::address(vault),
     }
 }
 
@@ -630,6 +634,10 @@ pub struct SettingsInfo {
     last_recorded: Option<Recorded>,
     /// The cloud storage service whose folder holds the bookshelf, such as OneDrive.
     synced_folder: Option<String>,
+    /// Where the bookshelf syncs with other computers, if it does.
+    sync_address: Option<String>,
+    /// False when the bookshelf is part of a larger git repository, which the writer syncs.
+    can_sync: bool,
 }
 
 /// A change recorded in the bookshelf's history.
@@ -670,6 +678,8 @@ pub async fn settings(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
         // A history that can't be read, such as when git is missing, shows as none.
         last_recorded: git::last_commit(&vault).ok().flatten().map(recorded),
         synced_folder: git::synced_folder(&vault.root).map(String::from),
+        sync_address: sync::address(&vault),
+        can_sync: vault.root.join(".git").exists() || !git::in_repository(&vault.root),
     })
 }
 
@@ -684,6 +694,118 @@ pub async fn set_keep_history(on: bool, state: State<'_, AppState>) -> CmdResult
         git::stop(&vault).or_message()?;
     }
     settings(state).await
+}
+
+/// What a sync brought in.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedInfo {
+    /// Files another computer's changes rewrote, added or removed.
+    changed: Vec<String>,
+    /// Notes changed here and on another computer: this computer's version was kept.
+    kept: Vec<String>,
+}
+
+fn synced_info(synced: sync::Synced) -> SyncedInfo {
+    let shown = |paths: Vec<PathBuf>| paths.iter().map(|p| p.display().to_string()).collect();
+    SyncedInfo {
+        changed: shown(synced.changed),
+        kept: shown(synced.kept),
+    }
+}
+
+/// Starts syncing the open bookshelf with the repository at `address`, and syncs.
+#[tauri::command]
+pub async fn connect_sync(address: String, state: State<'_, AppState>) -> CmdResult<SyncedInfo> {
+    let vault = state.vault()?;
+    Ok(synced_info(sync::connect(&vault, &address).or_message()?))
+}
+
+/// Stops syncing the open bookshelf.
+#[tauri::command]
+pub async fn disconnect_sync(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
+    sync::disconnect(&state.vault()?).or_message()?;
+    settings(state).await
+}
+
+/// Records this computer's changes and fetches the other computers'. Changes no files.
+#[tauri::command]
+pub async fn sync_fetch(state: State<'_, AppState>) -> CmdResult<()> {
+    sync::fetch(&state.vault()?).or_message()
+}
+
+/// Merges the fetched changes into the bookshelf. The app holds its saves while this runs.
+#[tauri::command]
+pub async fn sync_merge(state: State<'_, AppState>) -> CmdResult<SyncedInfo> {
+    Ok(synced_info(sync::merge(&state.vault()?).or_message()?))
+}
+
+/// Shares this computer's history; false if another computer shared something first.
+#[tauri::command]
+pub async fn sync_push(state: State<'_, AppState>) -> CmdResult<bool> {
+    sync::push(&state.vault()?).or_message()
+}
+
+/// Starts sharing this computer's history as the app closes, without waiting for it.
+#[tauri::command]
+pub async fn push_in_background(state: State<'_, AppState>) -> CmdResult<()> {
+    sync::push_in_background(&state.vault()?).or_message()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaitingNote {
+    path: String,
+    title: String,
+}
+
+/// Notes changed here and on another computer, waiting for the writer to choose a version.
+#[tauri::command]
+pub async fn waiting_notes(state: State<'_, AppState>) -> CmdResult<Vec<WaitingNote>> {
+    let vault = state.vault()?;
+    let waiting = sync::waiting(&vault).or_message()?;
+    Ok(waiting
+        .into_iter()
+        .map(|waiting| WaitingNote {
+            title: Note::load(&waiting.path)
+                .map(|note| note.title())
+                .unwrap_or_default(),
+            path: waiting.path.display().to_string(),
+        })
+        .collect())
+}
+
+/// The other computer's version of a waiting note: its text, without its properties.
+#[tauri::command]
+pub async fn other_version(path: String, state: State<'_, AppState>) -> CmdResult<String> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    let text = sync::other_version(&vault, &path).or_message()?;
+    Ok(Note::parse(&path, &text).body)
+}
+
+/// Settles a waiting note, using the other computer's version or keeping this one.
+#[tauri::command]
+pub async fn decide_version(
+    path: String,
+    use_other: bool,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    sync::decide(&vault, &path, use_other).or_message()
+}
+
+/// Copies a bookshelf from the repository at `address` into a new folder in `place`, and opens it.
+#[tauri::command]
+pub async fn clone_bookshelf(
+    address: String,
+    place: String,
+    state: State<'_, AppState>,
+    window: WebviewWindow,
+) -> CmdResult<VaultInfo> {
+    let root = sync::clone(&address, Path::new(&place)).or_message()?;
+    enter(&root, &state, &window)
 }
 
 /// Records the open bookshelf's changes in its history, if it keeps one. Returns what was

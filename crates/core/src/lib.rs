@@ -30,6 +30,7 @@ pub mod scratchpad;
 pub mod spelling;
 pub mod structures;
 pub mod submission;
+pub mod sync;
 pub mod templates;
 pub mod text;
 pub mod undo;

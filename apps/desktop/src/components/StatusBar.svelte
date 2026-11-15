@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatNumber, plural, signed } from "../lib/format";
-  import { app, save, type SaveState } from "../lib/store.svelte";
+  import { app, openWaiting, save, syncNow, type SaveState } from "../lib/store.svelte";
 
   const labels: Record<SaveState, string> = {
     saved: "Saved",
@@ -11,6 +11,17 @@
   };
 
   const met = $derived(!!app.today && app.today.goal > 0 && app.today.words >= app.today.goal);
+
+  const syncLabel = $derived.by(() => {
+    const sync = app.sync;
+    if (sync.state === "syncing") return "Syncing…";
+    if (sync.state === "failed") return "Not synced";
+    if (sync.state === "synced" && sync.at) {
+      const time = new Date(sync.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      return `Synced ${time}`;
+    }
+    return "Sync";
+  });
 </script>
 
 <footer class="status" class:focus={app.focus}>
@@ -24,6 +35,22 @@
     <span>Esc to leave focus</span>
   {/if}
   <span class="spacer"></span>
+  {#if app.sync.waiting.length}
+    <button class="waiting" title="Changed here and on another computer: choose which version to keep" onclick={() => openWaiting(app.sync.waiting[0].path)}>
+      {app.sync.waiting.length === 1 ? "1 note has two versions" : `${app.sync.waiting.length} notes have two versions`}
+    </button>
+  {/if}
+  {#if app.vault?.syncAddress && !app.focus}
+    <button
+      class="sync"
+      data-state={app.sync.state}
+      title={app.sync.state === "failed" ? app.sync.error : "Sync with your other computers now"}
+      disabled={app.sync.state === "syncing"}
+      onclick={() => syncNow()}
+    >
+      {syncLabel}
+    </button>
+  {/if}
   {#if app.tree?.book}
     {@const book = app.tree.book.summary}
     <span>
@@ -85,5 +112,20 @@
 
   .met {
     color: var(--final);
+  }
+
+  .sync,
+  .waiting {
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .sync[data-state="failed"],
+  .waiting {
+    color: var(--danger);
+    font-weight: 600;
   }
 </style>

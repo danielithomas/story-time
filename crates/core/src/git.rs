@@ -22,7 +22,7 @@ use crate::text::name_from_file;
 use crate::upgrade::BACKUPS_IGNORE;
 use crate::vault::Vault;
 
-const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
+pub(crate) const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 
 /// Whether the bookshelf is in a git repository: its folder, or one above it, holds `.git`.
 pub fn in_repository(root: &Path) -> bool {
@@ -88,6 +88,15 @@ pub fn stop(vault: &Vault) -> Result<()> {
 /// Nothing is recorded when nothing but the writing log changed: the log goes with the next
 /// change. In a repository that holds more than the bookshelf, only the bookshelf is committed.
 pub fn commit(vault: &Vault) -> Result<Option<Commit>> {
+    record(vault, false)
+}
+
+/// Records every change, even one to nothing but the writing log, as syncing needs a clean folder.
+pub(crate) fn commit_everything(vault: &Vault) -> Result<Option<Commit>> {
+    record(vault, true)
+}
+
+fn record(vault: &Vault, log_alone: bool) -> Result<Option<Commit>> {
     if !vault.config.keep_history {
         return Ok(None);
     }
@@ -106,17 +115,25 @@ pub fn commit(vault: &Vault) -> Result<Option<Commit>> {
     ]))?;
     let log = format!("{META_DIR}/history.csv");
     let fields: Vec<&str> = staged.split('\0').collect();
-    let changed: Vec<(&str, &str)> = fields
+    let staged: Vec<(&str, &str)> = fields
         .chunks(2)
         .filter_map(|pair| match pair {
-            [status, path] if !path.is_empty() && *path != log => Some((*status, *path)),
+            [status, path] if !path.is_empty() => Some((*status, *path)),
             _ => None,
         })
         .collect();
-    if changed.is_empty() {
+    let changed: Vec<(&str, &str)> = staged
+        .iter()
+        .copied()
+        .filter(|(_, path)| *path != log)
+        .collect();
+    let (subject, body) = if !changed.is_empty() {
+        message(vault, &changed)
+    } else if log_alone && !staged.is_empty() {
+        ("The writing log".to_string(), None)
+    } else {
         return Ok(None);
-    }
-    let (subject, body) = message(vault, &changed);
+    };
     let mut command = git(root);
     command
         .args(identity(vault))
@@ -247,7 +264,7 @@ fn message(vault: &Vault, changed: &[(&str, &str)]) -> (String, Option<String>) 
 
 /// Settings that name a commit's author, for a computer whose git doesn't say who is writing:
 /// the bookshelf's `author`, else Story Time.
-fn identity(vault: &Vault) -> Vec<String> {
+pub(crate) fn identity(vault: &Vault) -> Vec<String> {
     let set = |key: &str| {
         run(git(&vault.root).args(["config", "--get", key]))
             .is_ok_and(|value| !value.trim().is_empty())
@@ -437,7 +454,7 @@ impl Repository {
 /// `git`, run in `dir`. The variables a git hook sets are cleared, so the repository is found from
 /// the folder; git never waits for a password typed in a terminal; and settings that would change
 /// what git prints or copies are turned off.
-fn git(dir: &Path) -> Command {
+pub(crate) fn git(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command
         .current_dir(dir)
@@ -461,31 +478,36 @@ fn git(dir: &Path) -> Command {
     command
 }
 
-fn run(command: &mut Command) -> Result<String> {
-    let output = command.output().map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => anyhow!(
-            "keeping a history needs Git, a free program that isn't installed on this computer. \
-             Install it from https://git-scm.com and try again"
-        ),
-        _ => anyhow!(e).context("running git"),
-    })?;
+pub(crate) fn run(command: &mut Command) -> Result<String> {
+    let output = output(command)?;
     if !output.status.success() {
         bail!("git: {}", String::from_utf8_lossy(&output.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// Runs git and returns what it printed, whether or not it succeeded.
+pub(crate) fn output(command: &mut Command) -> Result<std::process::Output> {
+    command.output().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => anyhow!(
+            "keeping a history needs Git, a free program that isn't installed on this computer. \
+             Install it from https://git-scm.com and try again"
+        ),
+        _ => anyhow!(e).context("running git"),
+    })
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn has_git() -> bool {
+    pub(crate) fn has_git() -> bool {
         Command::new("git").arg("--version").output().is_ok()
     }
 
     /// Runs git in `dir` as a test user, away from this computer's git settings.
-    fn git_in(dir: &Path, args: &[&str], date: &str) {
+    pub(crate) fn git_in(dir: &Path, args: &[&str], date: &str) {
         let home = dir.join(".no-home");
         let status = Command::new("git")
             .current_dir(dir)
@@ -741,7 +763,7 @@ mod tests {
     }
 
     /// A bookshelf, outside any repository, with a world whose book has two scenes.
-    fn shelf(root: &Path) -> (Vault, PathBuf, PathBuf) {
+    pub(crate) fn shelf(root: &Path) -> (Vault, PathBuf, PathBuf) {
         use crate::contents::Place;
         use crate::project::Form;
         use crate::scaffold::{NewBook, NewProject, add_scene, create_project, init_vault};
@@ -774,12 +796,12 @@ mod tests {
         (vault, arrival, leaving)
     }
 
-    fn reopen(vault: &Vault) -> Vault {
+    pub(crate) fn reopen(vault: &Vault) -> Vault {
         Vault::open(&vault.root).unwrap()
     }
 
     /// What git says about the bookshelf's repository, from `dir`.
-    fn ask(dir: &Path, args: &[&str]) -> String {
+    pub(crate) fn ask(dir: &Path, args: &[&str]) -> String {
         run(git(dir).args(args)).unwrap()
     }
 

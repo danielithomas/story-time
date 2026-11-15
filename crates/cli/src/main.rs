@@ -128,7 +128,8 @@ enum Command {
     /// Record word counts without printing anything (for cron jobs or git hooks).
     Snapshot,
     /// Record the bookshelf's changes in its history, for a bookshelf that keeps one
-    /// (`keep_history = true` in its config, or Keep a history in the app's Settings).
+    /// (`keep_history = true` in its config, or Keep a history in the app's Settings), and sync
+    /// with other computers if it has a sync address (the git remote `origin`).
     Sync,
     /// Fill in the writing log from the bookshelf's git history, so days written while story-time
     /// wasn't running still count. Filling in again adds nothing.

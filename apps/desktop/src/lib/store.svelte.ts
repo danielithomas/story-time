@@ -28,6 +28,7 @@ import type {
   SettingsInfo,
   TodayInfo,
   VaultInfo,
+  WaitingNote,
 } from "./types";
 
 /** The views; Settings isn't one of the tabs, and opens from the bookshelf's name or Ctrl+,. */
@@ -65,6 +66,8 @@ export const app = $state({
   vault: null as VaultInfo | null,
   /** The welcome screen's form for starting a bookshelf is showing. */
   starting: false,
+  /** The welcome screen's form for opening a bookshelf from another computer is showing. */
+  cloning: false,
   /** A folder holding other things, waiting for the writer to say it may be set up. */
   pendingFolder: null as FolderInfo | null,
   choices: null as Choices | null,
@@ -84,6 +87,14 @@ export const app = $state({
   /** Set while the new-project dialog is open: for a new project, or a new book in the open one. */
   newProject: null as { title: string; idea: string | null; mode: "project" | "book" } | null,
   toasts: [] as Toast[],
+  /** Syncing with other computers: where it stands, and notes waiting for a choice of version. */
+  sync: {
+    state: "idle" as "idle" | "syncing" | "synced" | "failed",
+    /** When the last sync finished, as an ISO time. */
+    at: null as string | null,
+    error: "",
+    waiting: [] as WaitingNote[],
+  },
 });
 
 const SAVE_DELAY = 800;
@@ -93,6 +104,8 @@ const REFRESH_DELAY = 1500;
 const SNAPSHOT_EVERY = 10 * 60 * 1000;
 /** How long after the last change a bookshelf that keeps a history records it. */
 const HISTORY_DELAY = 5 * 60 * 1000;
+/** How long since the last sync before coming back to the window syncs again. */
+const SYNC_STALE = 10 * 60 * 1000;
 
 let body = "";
 let bodyDirty = false;
@@ -123,7 +136,12 @@ export async function init() {
     if (app.vault && !app.vault.needsUpgrade) api.recordSnapshot().catch(() => {});
     void backUp(true);
   }, SNAPSHOT_EVERY);
-  window.addEventListener("focus", () => void reloadIfChangedElsewhere());
+  window.addEventListener("focus", () => {
+    void reloadIfChangedElsewhere();
+    // Back at this computer after a while: bring in what was written on another.
+    const last = app.sync.at ? Date.parse(app.sync.at) : 0;
+    if (app.vault?.syncAddress && Date.now() - last > SYNC_STALE) void syncNow();
+  });
   window.addEventListener("keydown", onKey);
   await getCurrentWindow().onCloseRequested(async (event) => {
     await save();
@@ -133,17 +151,22 @@ export async function init() {
       return;
     }
     if (app.vault && !app.vault.needsUpgrade) await api.recordSnapshot().catch(() => {});
-    await recordHistory();
+    await recordHistory(false);
+    if (app.vault?.syncAddress) await api.pushInBackground().catch(() => {});
     await backUp(false);
   });
 }
 
 let historyError = "";
 
-/** Records the bookshelf's changes in its history, if it keeps one. A failure is shown once. */
-async function recordHistory() {
+/**
+ * Records the bookshelf's changes in its history, if it keeps one, and with `share`, syncs them
+ * when the bookshelf syncs with other computers. A failure is shown once.
+ */
+async function recordHistory(share = true): Promise<void> {
   clearTimeout(historyTimer);
   if (!app.vault?.keepHistory || app.vault.needsUpgrade) return;
+  if (share && app.vault.syncAddress) return syncNow();
   try {
     await api.recordHistory();
     historyError = "";
@@ -152,6 +175,141 @@ async function recordHistory() {
     if (message !== historyError) toast(message, undefined, "error");
     historyError = message;
   }
+}
+
+/** Runs `task` in turn with saves, so files aren't written while it changes them. */
+function withSavesHeld<T>(task: () => Promise<T>): Promise<T> {
+  const run = saveQueue.then(task);
+  saveQueue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+/**
+ * Syncs with the other computers: records and fetches while the writer carries on, merges with
+ * saves held, then shares. A note open here that another computer changed is reloaded if it has
+ * no unsaved changes; otherwise saving it asks which version to keep, as for any outside change.
+ */
+export async function syncNow(): Promise<void> {
+  if (!app.vault?.keepHistory || app.sync.state === "syncing") return;
+  if (!app.vault.syncAddress) return recordHistory(false);
+  clearTimeout(historyTimer);
+  app.sync.state = "syncing";
+  try {
+    await save();
+    let shared = false;
+    for (let attempt = 0; attempt < 2 && !shared; attempt++) {
+      await api.syncFetch();
+      const merged = await withSavesHeld(() => api.syncMerge());
+      if (merged.changed.length) await broughtIn(merged.changed);
+      shared = await api.syncPush();
+    }
+    if (!shared) throw new Error("another computer kept sharing changes at the same moment; sync again in a minute");
+    app.sync.state = "synced";
+    app.sync.at = new Date().toISOString();
+    app.sync.error = "";
+    historyError = "";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    app.sync.state = "failed";
+    if (`Not synced: ${message}` !== historyError) toast(`Not synced: ${message}`, undefined, "error");
+    historyError = `Not synced: ${message}`;
+    app.sync.error = message;
+  }
+  await loadWaiting();
+}
+
+/** After a sync rewrote `changed`, shows the bookshelf as it now is. */
+async function broughtIn(changed: string[]) {
+  const doc = app.doc;
+  if (doc && changed.includes(doc.path) && !hasPending() && app.saveState === "saved") {
+    try {
+      setDoc(await api.readNote(doc.path));
+      toast("Brought in changes to this note from another computer.");
+    } catch {
+      clearDoc();
+    }
+  }
+  await loadProjects().catch(() => {});
+  if (app.slug) app.tree = await api.projectTree(app.slug, app.book).catch(() => app.tree);
+  await refreshToday().catch(() => {});
+}
+
+async function loadWaiting() {
+  try {
+    app.sync.waiting = app.vault?.keepHistory ? await api.waitingNotes() : [];
+  } catch {
+    // Unknown until the next sync.
+  }
+}
+
+/** Opens a note waiting for a choice of version, in its project. */
+export async function openWaiting(path: string) {
+  try {
+    const doc = await api.readNote(path);
+    app.view = "write";
+    if (doc.project && doc.project !== app.slug) await selectProject(doc.project, doc.book, path);
+    else await openNote(path);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Settles the open note's two versions: the other computer's, or this one. */
+export async function decideVersion(useOther: boolean) {
+  const doc = app.doc;
+  if (!doc || !(await settle())) return;
+  try {
+    await withSavesHeld(() => api.decideVersion(doc.path, useOther));
+    if (useOther) setDoc(await api.readNote(doc.path));
+    await loadWaiting();
+    toast(useOther ? "Now using the other computer's version." : "Kept this computer's version.");
+    scheduleRefresh();
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Starts syncing with the repository at `address`. */
+export async function connectSync(address: string): Promise<boolean> {
+  if (!(await settle())) return false;
+  try {
+    const synced = await withSavesHeld(() => api.connectSync(address));
+    if (app.vault) app.vault.syncAddress = address.trim();
+    if (synced.changed.length) await broughtIn(synced.changed);
+    app.sync.state = "synced";
+    app.sync.at = new Date().toISOString();
+    app.sync.error = "";
+    await loadWaiting();
+    return true;
+  } catch (error) {
+    toastError(error);
+    return false;
+  }
+}
+
+/** Stops syncing with other computers. */
+export async function disconnectSync(): Promise<SettingsInfo | null> {
+  try {
+    const settings = await api.disconnectSync();
+    if (app.vault) app.vault.syncAddress = null;
+    app.sync = { state: "idle", at: null, error: "", waiting: app.sync.waiting };
+    return settings;
+  } catch (error) {
+    toastError(error);
+    return null;
+  }
+}
+
+/** Copies a bookshelf from another computer's sync address, and opens it. */
+export async function cloneBookshelf(address: string, place: string) {
+  if (!(await settle())) return;
+  app.vault = await api.cloneBookshelf(address, place);
+  app.cloning = false;
+  app.view = "write";
+  await enterVault();
 }
 
 /** Records the history a few minutes after the last change, so a pause in writing makes one entry. */
@@ -209,6 +367,8 @@ async function enterVault() {
   }
   await refreshToday();
   void backUp(true);
+  app.sync = { state: "idle", at: null, error: "", waiting: [] };
+  if (app.vault?.keepHistory) void syncNow();
 }
 
 export function setTheme(theme: Theme) {

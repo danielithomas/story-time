@@ -17,6 +17,7 @@ use story_time_core::ideas;
 use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
 use story_time_core::scratchpad::{self, Scratchpad};
+use story_time_core::sync;
 use story_time_core::upgrade;
 use story_time_core::vault::Measured;
 use story_time_core::{Book, Form, NoteKind, Scene, Vault};
@@ -616,6 +617,32 @@ pub fn sync(vault: &Vault, now: NaiveDateTime) -> Result<()> {
     match git::commit(vault)? {
         Some(commit) => println!("Recorded: {}.", commit.message),
         None => println!("Nothing new to record."),
+    }
+    let Some(address) = sync::address(vault) else {
+        return Ok(());
+    };
+    let synced = sync::sync(vault)?;
+    let brought = if synced.changed.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ", bringing in changes to {}",
+            plural(synced.changed.len() as u64, "file", "files")
+        )
+    };
+    println!("Synced with {address}{brought}.");
+    let waiting = sync::waiting(vault)?;
+    if !waiting.is_empty() {
+        let names: Vec<String> = waiting
+            .iter()
+            .map(|waiting| vault.relative(&waiting.path).display().to_string())
+            .collect();
+        println!(
+            "Changed here and on another computer, so this computer's version was kept: {}. \
+             Open {} in Story Time to choose which version to keep.",
+            names.join(", "),
+            if names.len() == 1 { "it" } else { "each" }
+        );
     }
     Ok(())
 }

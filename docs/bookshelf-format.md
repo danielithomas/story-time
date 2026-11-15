@@ -202,6 +202,8 @@ Every setting is optional: a missing one takes its default, shown above (`author
 
 **A bookshelf that keeps a history** (`keep_history = true`) is a git repository, or is tracked by one around it. story-time commits the whole bookshelf folder, apart from what `.gitignore` leaves out, a few minutes after writing stops, when the app closes, and on `story-time sync`. Each commit's message names the notes that changed. Anything else that works with git can work in the same repository. Turning the setting off stops the commits and keeps the history.
 
+**Syncing** goes through the bookshelf's git remote `origin`, when it has one. Prose is never merged: when a note was changed on two computers before they synced, the merge keeps one computer's version, and its commit message has a line `Story-Time-Kept: <path>` (the path relative to the bookshelf). The other version is in the merge's second parent. When the writer chooses, a commit with the line `Story-Time-Decided: <path>` records it. A note is waiting for a choice while the newest of those lines for it says `Kept`.
+
 **`.story-time/history.csv`** is the writing log. It is append-only and never rewritten. Each row is `timestamp,id,words`: a local time (`2026-11-05T21:09:00`), what was measured, and its word count at that moment.
 
 - What was measured is a book's `id`, a project's `id` for the project's scratchpad, or `scratchpad` for the bookshelf's.

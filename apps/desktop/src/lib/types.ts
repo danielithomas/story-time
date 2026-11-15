@@ -10,6 +10,8 @@ export interface VaultInfo {
   inGit: boolean;
   /** Keeps a history, which the app records a few minutes after writing stops. */
   keepHistory: boolean;
+  /** Where it syncs with other computers, if it does. */
+  syncAddress: string | null;
 }
 
 /** What filling in the writing log from git history did. */
@@ -41,6 +43,24 @@ export interface SettingsInfo {
   lastRecorded: Recorded | null;
   /** The cloud storage service whose folder holds the bookshelf, such as OneDrive. */
   syncedFolder: string | null;
+  /** Where the bookshelf syncs with other computers, if it does. */
+  syncAddress: string | null;
+  /** False when the bookshelf is part of a larger git repository, which the writer syncs. */
+  canSync: boolean;
+}
+
+/** What a sync brought in. */
+export interface SyncedInfo {
+  /** Files another computer's changes rewrote, added or removed. */
+  changed: string[];
+  /** Notes changed here and on another computer: this computer's version was kept. */
+  kept: string[];
+}
+
+/** A note changed here and on another computer, waiting for the writer to choose a version. */
+export interface WaitingNote {
+  path: string;
+  title: string;
 }
 
 /** A change recorded in the bookshelf's history. */

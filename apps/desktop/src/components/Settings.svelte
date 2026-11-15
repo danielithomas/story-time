@@ -7,7 +7,10 @@
     chooseBookshelfPlace,
     chooseVault,
     saveSettings,
+    connectSync,
+    disconnectSync,
     setKeepHistory,
+    syncNow,
     setTheme,
     setTypewriter,
     toastError,
@@ -61,6 +64,22 @@
   }
 
   let turning = $state(false);
+  let address = $state("");
+  let connecting = $state(false);
+
+  async function connect(event: SubmitEvent) {
+    event.preventDefault();
+    connecting = true;
+    if (await connectSync(address)) {
+      address = "";
+      settings = await api.settings().catch(() => settings);
+    }
+    connecting = false;
+  }
+
+  async function disconnect() {
+    settings = (await disconnectSync()) ?? settings;
+  }
 
   async function keepHistory(on: boolean) {
     turning = true;
@@ -212,6 +231,44 @@
           {/if}
         </p>
       {/if}
+      {#if settings.keepHistory}
+        <h3>Sync with your other computers</h3>
+        {#if !settings.canSync}
+          <p class="muted">This bookshelf is part of a larger git repository, so Story Time leaves syncing it to you.</p>
+        {:else if settings.syncAddress}
+          <p>Syncing with <code class="path">{settings.syncAddress}</code></p>
+          <p class="muted">
+            Story Time syncs when the bookshelf opens, a few minutes after you stop writing, and when you come back to
+            it after a while; and shares your writing as it closes.
+            {#if app.sync.state === "synced" && app.sync.at}
+              Last synced {when(app.sync.at)}.
+            {:else if app.sync.state === "failed"}
+              <span class="problem">Not synced: {app.sync.error}.</span>
+            {/if}
+          </p>
+          <div class="actions">
+            <button class="btn" disabled={app.sync.state === "syncing"} onclick={() => syncNow()}>
+              {app.sync.state === "syncing" ? "Syncing…" : "Sync now"}
+            </button>
+            <button class="btn" onclick={disconnect}>Stop syncing</button>
+          </div>
+        {:else}
+          <p class="muted">
+            To have this bookshelf on another computer, create an empty private repository with a service such as
+            GitHub, GitLab or Codeberg, and paste its address here. Then, on the other computer, choose
+            <strong>Open a bookshelf from another computer</strong> when Story Time starts.
+          </p>
+          <form class="place" onsubmit={connect}>
+            <input
+              class="address"
+              bind:value={address}
+              placeholder="https://github.com/you/stories.git"
+              aria-label="The repository's address"
+            />
+            <button class="btn" disabled={connecting || !address.trim()}>{connecting ? "Connecting…" : "Connect"}</button>
+          </form>
+        {/if}
+      {/if}
     </section>
 
     <section>
@@ -312,6 +369,20 @@
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
+  }
+
+  h3 {
+    margin: 1rem 0 0;
+    font-size: 14px;
+  }
+
+  .address {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .problem {
+    color: var(--danger);
   }
 
   .warning {

@@ -1,6 +1,14 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, chooseBookshelfPlace, chooseVault, setUpPendingFolder, startBookshelf, upgradeVault } from "../lib/store.svelte";
+  import {
+    app,
+    chooseBookshelfPlace,
+    chooseVault,
+    cloneBookshelf,
+    setUpPendingFolder,
+    startBookshelf,
+    upgradeVault,
+  } from "../lib/store.svelte";
 
   let upgrading = $state(false);
   let name = $state("Stories");
@@ -8,10 +16,24 @@
   let example = $state(true);
   let busy = $state(false);
   let error = $state("");
+  let address = $state("");
 
   $effect(() => {
-    if (app.starting && !place) api.defaultBookshelfPlace().then((found) => (place = found), () => {});
+    if ((app.starting || app.cloning) && !place) api.defaultBookshelfPlace().then((found) => (place = found), () => {});
   });
+
+  async function copy(event: SubmitEvent) {
+    event.preventDefault();
+    busy = true;
+    error = "";
+    try {
+      await cloneBookshelf(address, place);
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
 
   async function upgrade() {
     upgrading = true;
@@ -77,6 +99,33 @@
         </button>
         <button class="btn" disabled={upgrading} onclick={chooseVault}>Open another bookshelf</button>
       </div>
+    {:else if app.cloning}
+      <form onsubmit={copy}>
+        <h1>Open a bookshelf from another computer</h1>
+        <p class="lead">For a bookshelf you sync from another computer.</p>
+        <p class="muted">
+          Paste the address it syncs with, as its Settings show it under History. Story Time copies the bookshelf here,
+          and from then on keeps both computers in step.
+        </p>
+        <label class="field">
+          <span>Address</span>
+          <input bind:value={address} use:select required placeholder="https://github.com/you/stories.git" />
+        </label>
+        <div class="field">
+          <span>Put it in</span>
+          <div class="place">
+            <code title={place}>{place || "…"}</code>
+            <button type="button" class="btn" onclick={changePlace}>Change…</button>
+          </div>
+        </div>
+        {#if error}
+          <p class="error">{error}</p>
+        {/if}
+        <div class="actions">
+          <button class="btn primary" disabled={busy || !address.trim() || !place}>{busy ? "Copying…" : "Open"}</button>
+          <button type="button" class="btn" onclick={() => ((app.cloning = false), (error = ""))}>Back</button>
+        </div>
+      </form>
     {:else if app.starting}
       <form onsubmit={start}>
         <h1>Start a bookshelf</h1>
@@ -115,6 +164,7 @@
       <div class="actions">
         <button class="btn primary" onclick={() => (app.starting = true)}>Start a bookshelf</button>
         <button class="btn" onclick={chooseVault}>Open a bookshelf</button>
+        <button class="btn" onclick={() => (app.cloning = true)}>Open a bookshelf from another computer</button>
       </div>
     {/if}
   </div>

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
   import { createEditor, type ProseEditor } from "../lib/editor";
-  import { app, edited, keepMine, takeTheirs } from "../lib/store.svelte";
+  import { api } from "../lib/api";
+  import { app, decideVersion, edited, keepMine, takeTheirs, toastError } from "../lib/store.svelte";
 
   let host: HTMLDivElement;
   let editor: ProseEditor | undefined;
@@ -24,6 +25,32 @@
       if (app.view === "write") void tick().then(() => editor?.focus());
     });
   });
+
+  // A note changed here and on another computer before they synced: the other version, once asked for.
+  const twoVersions = $derived(!!app.doc && app.sync.waiting.some((waiting) => waiting.path === app.doc?.path));
+  let other = $state<{ path: string; text: string } | null>(null);
+  let choosing = $state(false);
+
+  async function showOther() {
+    const path = app.doc?.path;
+    if (!path) return;
+    if (other?.path === path) {
+      other = null;
+      return;
+    }
+    try {
+      other = { path, text: await api.otherVersion(path) };
+    } catch (error) {
+      toastError(error);
+    }
+  }
+
+  async function choose(useOther: boolean) {
+    choosing = true;
+    await decideVersion(useOther);
+    choosing = false;
+    other = null;
+  }
 
   const kindLabels: Record<string, string> = {
     project: "Overview",
@@ -54,6 +81,20 @@
       <button class="btn" onclick={takeTheirs}>Use the other version</button>
       <button class="btn primary" onclick={keepMine}>Keep mine</button>
     </div>
+  {/if}
+  {#if twoVersions && app.saveState !== "conflict"}
+    <div class="conflict" role="alert">
+      <span>
+        This note was changed here and on another computer before they synced. Story Time kept this computer's
+        version.
+      </span>
+      <button class="btn" onclick={showOther}>{other?.path === app.doc?.path ? "Hide" : "Show"} the other version</button>
+      <button class="btn" disabled={choosing} onclick={() => choose(true)}>Use the other version</button>
+      <button class="btn primary" disabled={choosing} onclick={() => choose(false)}>Keep this one</button>
+    </div>
+    {#if other && other.path === app.doc?.path}
+      <div class="other" aria-label="The other computer's version">{other.text}</div>
+    {/if}
   {/if}
   {#if !app.focus}
     <div class="trail">{trail}</div>
@@ -95,5 +136,17 @@
 
   .conflict span {
     flex: 1;
+  }
+
+  .other {
+    flex: none;
+    max-height: 40%;
+    overflow-y: auto;
+    padding: 1rem 1.5rem;
+    white-space: pre-wrap;
+    font-family: var(--serif);
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
   }
 </style>
