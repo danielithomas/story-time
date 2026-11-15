@@ -60,6 +60,7 @@ fn main() {
             commands::link_for,
             commands::writing_today,
             commands::record_snapshot,
+            commands::fill_in_from_git,
             commands::book_progress,
             commands::check_project,
             commands::compile_book,

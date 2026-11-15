@@ -845,6 +845,19 @@ async function refreshToday() {
   app.today = await api.writingToday();
 }
 
+/** Fills in the writing log from the bookshelf's git history; the counts shown follow. */
+export async function fillInFromGit() {
+  try {
+    const filled = await api.fillInFromGit();
+    await refreshToday();
+    if (filled.days === 0) toast("The git history has no commits of this bookshelf to read.");
+    else if (filled.changed === 0) toast("The writing log already has everything in the git history.");
+    else toast(`Filled in the writing log from git: ${plural(filled.changed, "day")} changed.`);
+  } catch (error) {
+    toastError(error);
+  }
+}
+
 // ---- Export, focus, keys, messages ----
 
 export async function compile(format: string) {

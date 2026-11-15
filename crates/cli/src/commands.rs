@@ -4,13 +4,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use chrono::{Days, NaiveDateTime};
+use chrono::{Datelike, Days, NaiveDateTime};
 use story_time_core::backup;
 use story_time_core::check::{self, BIBLE};
 use story_time_core::compile::{self, Format};
 use story_time_core::config::{FORMAT, UserConfig};
 use story_time_core::contents::Place;
 use story_time_core::example;
+use story_time_core::git;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::rename;
@@ -600,6 +601,63 @@ pub fn today(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
         println!(
             "  stats, today or history, so run one after each session, or schedule `story-time snapshot`."
         );
+    }
+    Ok(())
+}
+
+pub fn backfill(vault: &Vault, now: NaiveDateTime, dry_run: bool) -> Result<()> {
+    let filled = git::backfill(vault, now, !dry_run)?;
+    let left_out = || {
+        if filled.skipped > 0 {
+            println!(
+                "Left out {}, from before story-time set up or upgraded the bookshelf.",
+                plural(filled.skipped as u64, "earlier day", "earlier days")
+            );
+        }
+    };
+    let (Some(first), Some(last)) = (filled.days.first(), filled.days.last()) else {
+        println!("The git history has no commits of this bookshelf to read.");
+        left_out();
+        return Ok(());
+    };
+    let from = if first.year() == last.year() {
+        first.format("%-d %B")
+    } else {
+        first.format("%-d %B %Y")
+    };
+    println!(
+        "Read {} of git history, from {from} to {}.",
+        plural(filled.days.len() as u64, "day", "days"),
+        last.format("%-d %B %Y")
+    );
+    left_out();
+    if filled.changed.is_empty() {
+        println!("The writing log already has everything in it.");
+        return Ok(());
+    }
+    let shown = |words: i64| {
+        if words == 0 {
+            "·".to_string()
+        } else {
+            signed(words)
+        }
+    };
+    println!();
+    println!("  {:<15}  {:>7}  {:>7}", "Words written", "was", "now");
+    for (day, was, is) in &filled.changed {
+        println!(
+            "  {:<15}  {:>7}  {:>7}",
+            day.format("%a %e %b %Y").to_string(),
+            shown(*was),
+            shown(*is)
+        );
+    }
+    println!();
+    let days = plural(filled.changed.len() as u64, "day", "days");
+    if dry_run {
+        println!("{days} would change. Nothing was added (--dry-run).");
+    } else {
+        println!("Filled in the writing log: {days} changed.");
     }
     Ok(())
 }

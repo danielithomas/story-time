@@ -1,11 +1,18 @@
 <script lang="ts">
   import { api } from "../lib/api";
   import { capitalise, duration, formatNumber, plural, signed } from "../lib/format";
-  import { app, toastError } from "../lib/store.svelte";
+  import { app, fillInFromGit, toastError } from "../lib/store.svelte";
   import type { BookProgress } from "../lib/types";
 
   const DAYS = 30;
   let progress = $state<BookProgress | null>(null);
+  let filling = $state(false);
+
+  async function fillIn() {
+    filling = true;
+    await fillInFromGit();
+    filling = false;
+  }
 
   // Reload when the project or book changes, and after saves refresh today's count.
   $effect(() => {
@@ -127,7 +134,13 @@
       </div>
       <p class="hint">
         Counted from saved word totals. Words written while Story Time is closed count toward the next day it's open.
+        {#if app.vault?.inGit}
+          This bookshelf is kept in git, so those days can be filled in from its history.
+        {/if}
       </p>
+      {#if app.vault?.inGit}
+        <button class="btn fill" disabled={filling} onclick={fillIn}>{filling ? "Filling in…" : "Fill in from git"}</button>
+      {/if}
     </section>
   </div>
 {/if}
@@ -292,5 +305,9 @@
     margin-top: 0.6rem;
     font-size: 12px;
     color: var(--muted);
+  }
+
+  .fill {
+    margin-top: 0.6rem;
   }
 </style>

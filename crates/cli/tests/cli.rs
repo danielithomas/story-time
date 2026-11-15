@@ -600,3 +600,84 @@ fn upgrades_a_vault_from_story_time_0_1() {
     let again = run(root, &["upgrade"]);
     assert!(String::from_utf8_lossy(&again.stderr).contains("already in format 1"));
 }
+
+/// Runs git in `dir` as a test user, away from this computer's git settings, with commits dated
+/// `date`.
+fn git(dir: &Path, args: &[&str], date: &str) {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", dir.join(".no-gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_DATE", date)
+        .env("GIT_COMMITTER_DATE", date)
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn fills_in_the_writing_log_from_git() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let commit = |date: &str| {
+        git(root, &["add", "-A"], date);
+        git(root, &["commit", "--quiet", "-m", date], date);
+    };
+    git(root, &["init", "--quiet"], "2025-01-06T09:00:00+00:00");
+    ok(root, &["init"]);
+    ok(root, &["new", "Sample Story"]);
+    ok(root, &["add", "scene", "Arrival"]);
+    commit("2025-01-06T20:00:00+00:00");
+    let scene = root.join("sample-story-world/books/sample-story/scenes/arrival.md");
+    let mut text = fs::read_to_string(&scene).unwrap();
+    text.push_str("\nShe came ashore at dawn, and nobody saw her.\n");
+    fs::write(&scene, &text).unwrap();
+    commit("2025-01-07T21:00:00+00:00");
+    // As though story-time never measured the bookshelf: the commands above logged today's counts.
+    fs::remove_file(root.join(".story-time/history.csv")).unwrap();
+
+    let looked = ok(root, &["backfill", "--dry-run"]);
+    assert!(
+        looked.contains("Read 2 days of git history, from 6 January to 7 January 2025."),
+        "{looked}"
+    );
+    assert!(
+        looked.contains("Tue  7 Jan 2025        ·       +9"),
+        "{looked}"
+    );
+    assert!(looked.contains("Nothing was added (--dry-run)"), "{looked}");
+    let filled = ok(root, &["backfill"]);
+    assert!(
+        filled.contains("Filled in the writing log: 1 day changed."),
+        "{filled}"
+    );
+    let again = ok(root, &["backfill"]);
+    assert!(again.contains("already has everything"), "{again}");
+    let log = fs::read_to_string(root.join(".story-time/history.csv")).unwrap();
+    assert!(log.contains("2025-01-07T21:00:00,"), "{log}");
+
+    let elsewhere = TempDir::new().unwrap();
+    ok(elsewhere.path(), &["init"]);
+    let refused = run(elsewhere.path(), &["backfill"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("isn't in a git repository"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+}

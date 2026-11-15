@@ -16,6 +16,7 @@ pub mod config;
 pub mod contents;
 pub mod delete;
 pub mod example;
+pub mod git;
 pub mod history;
 mod home;
 pub mod ideas;

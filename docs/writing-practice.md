@@ -35,7 +35,7 @@ Writers sit on a spectrum. *Plotters* outline first; *discovery writers* ("pants
 - **A modest daily goal, kept.** Consistency beats bursts. Graham Greene famously stopped at 500 words a day. The NaNoWriMo pace of 50,000 words in a month is about 1,667 a day, a sprint rather than a habit. A goal you hit most days builds the habit; a streak makes it visible.
 - **Count honestly.** Net words is the honest measure: a day spent cutting 2,000 words of a bad subplot is a good day, even if the count goes down.
 
-**story-time:** `today`, `history` and the writing log; `daily_goal` in `.story-time/config.toml`; `snapshot` for a nightly cron job so no day is missed.
+**story-time:** `today`, `history` and the writing log; `daily_goal` in `.story-time/config.toml`; `snapshot` for a nightly cron job so no day is missed, and `backfill` to fill in missed days from a bookshelf's git history.
 
 ## 5. Revising
 
@@ -74,5 +74,4 @@ The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop a
 Ordered roughly by value for effort:
 
 1. **Desktop app, next steps.** Test the Windows and macOS installers (#13).
-2. **History from git.** Backfill the writing log from obsidian-git's commits, so days when story-time wasn't run still count.
-3. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).
+2. **Chronology.** Read each scene's `when` and the timeline note, and show story time against telling order (#21).

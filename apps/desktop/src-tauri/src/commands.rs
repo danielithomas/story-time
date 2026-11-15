@@ -14,6 +14,7 @@ use story_time_core::compile::{self, Format};
 use story_time_core::contents::{self, ChapterSpot, Contents, Moved, Place, Spot};
 use story_time_core::delete;
 use story_time_core::example;
+use story_time_core::git;
 use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::links::LinkIndex;
@@ -113,6 +114,8 @@ pub struct VaultInfo {
     daily_goal: u64,
     /// The vault is laid out as story-time 0.1 did it, and must be upgraded before it's opened.
     needs_upgrade: bool,
+    /// The vault is in a git repository, so its writing log can be filled in from its history.
+    in_git: bool,
 }
 
 fn vault_info(vault: &Vault) -> VaultInfo {
@@ -125,6 +128,7 @@ fn vault_info(vault: &Vault) -> VaultInfo {
             .unwrap_or_default(),
         daily_goal: vault.config.daily_goal,
         needs_upgrade: vault.config.needs_upgrade(),
+        in_git: git::in_repository(&vault.root),
     }
 }
 
@@ -1448,6 +1452,27 @@ pub async fn record_snapshot(state: State<'_, AppState>) -> CmdResult<()> {
         .snapshot(Local::now().naive_local())
         .or_message()
         .map(drop)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackfillInfo {
+    /// Days of git history read.
+    days: usize,
+    /// Days whose words written changed.
+    changed: usize,
+}
+
+/// Fills in the writing log from the bookshelf's git history, so days written while Story Time
+/// was closed count on the day they were written.
+#[tauri::command]
+pub async fn fill_in_from_git(state: State<'_, AppState>) -> CmdResult<BackfillInfo> {
+    let vault = state.vault()?;
+    let filled = git::backfill(&vault, Local::now().naive_local(), true).or_message()?;
+    Ok(BackfillInfo {
+        days: filled.days.len(),
+        changed: filled.changed.len(),
+    })
 }
 
 #[derive(Serialize)]

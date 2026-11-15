@@ -6,6 +6,16 @@ export interface VaultInfo {
   dailyGoal: number;
   /** Laid out as story-time 0.1 did it: it must be upgraded before it opens. */
   needsUpgrade: boolean;
+  /** In a git repository, so its writing log can be filled in from its history. */
+  inGit: boolean;
+}
+
+/** What filling in the writing log from git history did. */
+export interface BackfillInfo {
+  /** Days of git history read. */
+  days: number;
+  /** Days whose words written changed. */
+  changed: number;
 }
 
 /** What the Settings screen shows: the bookshelf's own settings, and this computer's for backups. */

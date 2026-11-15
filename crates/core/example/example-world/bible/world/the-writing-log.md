@@ -19,6 +19,8 @@ Words written in a day are the net change across your whole bookshelf, so deleti
 
 This example's words were logged when it was added, so they don't count as words you wrote that day.
 
+Words written while Story Time is closed count toward the next day it's open. If your bookshelf is kept in git, Fill in from git on the Progress screen puts them on the day they were committed.
+
 ## Who it affects
 
 The writer, every day.

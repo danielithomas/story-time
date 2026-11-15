@@ -64,8 +64,16 @@ impl History {
         counts: &[(String, u64)],
     ) -> Result<usize> {
         let fresh = self.changes(at, counts);
+        let written = fresh.len();
+        self.append(path, fresh)?;
+        Ok(written)
+    }
+
+    /// Appends snapshots to the log, which is never rewritten. Rows needn't be in time order:
+    /// loading sorts them.
+    pub fn append(&mut self, path: &Path, fresh: Vec<Snapshot>) -> Result<()> {
         if fresh.is_empty() {
-            return Ok(0);
+            return Ok(());
         }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
@@ -91,9 +99,40 @@ impl History {
         }
         file.write_all(lines.as_bytes())
             .with_context(|| format!("writing {}", path.display()))?;
-        let written = fresh.len();
         self.snapshots.extend(fresh);
-        Ok(written)
+        self.snapshots.sort_by_key(|snapshot| snapshot.at);
+        Ok(())
+    }
+
+    /// Of readings taken in the past, such as the counts in a bookshelf's git history, those that
+    /// add something: a reading whose count differs from what the log says its key had at that
+    /// moment, counting the readings kept before it. Oldest first; nothing is written.
+    pub fn missing(&self, readings: &[Snapshot]) -> Vec<Snapshot> {
+        let mut readings = readings.to_vec();
+        readings.sort_by_key(|reading| reading.at);
+        let mut log = self.snapshots.clone();
+        let mut kept = Vec::new();
+        for reading in readings {
+            let place = log.partition_point(|snapshot| snapshot.at <= reading.at);
+            let count = log[..place]
+                .iter()
+                .rev()
+                .find(|snapshot| snapshot.key == reading.key)
+                .map(|snapshot| snapshot.words);
+            if count != Some(reading.words) {
+                log.insert(place, reading.clone());
+                kept.push(reading);
+            }
+        }
+        kept
+    }
+
+    /// The log with these snapshots added, without writing anything.
+    pub fn with(&self, more: &[Snapshot]) -> History {
+        let mut snapshots = self.snapshots.clone();
+        snapshots.extend_from_slice(more);
+        snapshots.sort_by_key(|snapshot| snapshot.at);
+        History { snapshots }
     }
 
     /// The log as it would be with these counts recorded at `at`, without writing anything.
@@ -293,5 +332,55 @@ mod tests {
             "preview changes nothing"
         );
         assert!(!fs::read_to_string(&path).unwrap().contains("beta,1000"));
+    }
+
+    #[test]
+    fn past_readings_fill_in_only_what_the_log_lacks() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("history.csv");
+        let mut history = History::default();
+        history
+            .record(&path, at(28, 21), &counts(&[("alpha", 2000)]))
+            .unwrap();
+        let reading = |day, hour, words| Snapshot {
+            at: at(day, hour),
+            key: "alpha".to_string(),
+            words,
+        };
+        let readings = [
+            reading(26, 22, 1500),
+            reading(25, 22, 1000),
+            reading(27, 22, 1500),
+            reading(28, 23, 2000),
+        ];
+        let missing = history.missing(&readings);
+        assert_eq!(
+            missing,
+            [reading(25, 22, 1000), reading(26, 22, 1500)],
+            "oldest first; the 27th and the 28th add nothing"
+        );
+        history.append(&path, missing).unwrap();
+        let daily = history.daily(None);
+        assert_eq!(daily.get(&at(25, 0).date()), Some(&0), "the new baseline");
+        assert_eq!(daily.get(&at(26, 0).date()), Some(&500));
+        assert_eq!(daily.get(&at(28, 0).date()), Some(&500));
+        assert!(
+            history.missing(&readings).is_empty(),
+            "filling in twice adds nothing"
+        );
+
+        let reloaded = History::load(&path).unwrap();
+        assert_eq!(
+            reloaded.daily(None),
+            daily,
+            "rows out of time order read the same"
+        );
+        assert_eq!(reloaded.latest("alpha"), Some(2000));
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .ends_with("2026-10-28T21:00:00,alpha,2000\n2026-10-25T22:00:00,alpha,1000\n2026-10-26T22:00:00,alpha,1500\n"),
+            "appended, never rewritten"
+        );
     }
 }

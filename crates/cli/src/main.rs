@@ -127,6 +127,13 @@ enum Command {
     },
     /// Record word counts without printing anything (for cron jobs or git hooks).
     Snapshot,
+    /// Fill in the writing log from the bookshelf's git history, so days written while story-time
+    /// wasn't running still count. Filling in again adds nothing.
+    Backfill {
+        /// Show which days would change without adding to the writing log.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List the ideas in the ideas file, with the project each became.
     Ideas {
         #[command(flatten)]
@@ -368,6 +375,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::History { days, output } => commands::history(&vault, days, now, output.json),
         Command::Ideas { output } => commands::ideas(&vault, output.json),
         Command::Snapshot => vault.snapshot(now).map(drop),
+        Command::Backfill { dry_run } => commands::backfill(&vault, now, dry_run),
         Command::Backup => commands::backup(&vault, now),
         Command::Idea { text, non_fiction } => commands::idea(&vault, &text.join(" "), non_fiction),
         Command::Scrap {

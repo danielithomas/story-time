@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AddedNote,
+  BackfillInfo,
   BibleKind,
   BookProgress,
   ChapterSpot,
@@ -107,6 +108,7 @@ export const api = {
   linkFor: (from: string, to: string) => invoke<string>("link_for", { from, to }),
   writingToday: () => invoke<TodayInfo>("writing_today"),
   recordSnapshot: () => invoke<void>("record_snapshot"),
+  fillInFromGit: () => invoke<BackfillInfo>("fill_in_from_git"),
   bookProgress: (slug: string, book: string | null, days: number) =>
     invoke<BookProgress>("book_progress", { slug, book, days }),
   checkProject: (slug: string) => invoke<CheckReport>("check_project", { slug }),
