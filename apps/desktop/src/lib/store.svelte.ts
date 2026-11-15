@@ -325,9 +325,12 @@ export async function setKeepHistory(on: boolean): Promise<SettingsInfo | null> 
     const settings = await api.setKeepHistory(on);
     if (app.vault) {
       app.vault.keepHistory = settings.keepHistory;
+      app.vault.syncAddress = settings.keepHistory ? settings.syncAddress : null;
       if (settings.keepHistory) app.vault.inGit = true;
     }
     if (!on) clearTimeout(historyTimer);
+    // A bookshelf whose repository already has somewhere to sync with starts syncing at once.
+    if (on && settings.syncAddress) void syncNow();
     return settings;
   } catch (error) {
     toastError(error);

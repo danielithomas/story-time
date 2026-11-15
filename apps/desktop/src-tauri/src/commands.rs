@@ -135,7 +135,12 @@ fn vault_info(vault: &Vault) -> VaultInfo {
         needs_upgrade: vault.config.needs_upgrade(),
         in_git: git::in_repository(&vault.root),
         keep_history: vault.config.keep_history,
-        sync_address: sync::address(vault),
+        // A repository's remote is synced only once the bookshelf keeps a history.
+        sync_address: vault
+            .config
+            .keep_history
+            .then(|| sync::address(vault))
+            .flatten(),
     }
 }
 
