@@ -605,6 +605,21 @@ pub fn today(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn sync(vault: &Vault, now: NaiveDateTime) -> Result<()> {
+    if !vault.config.keep_history {
+        bail!(
+            "this bookshelf doesn't keep a history. Turn on Keep a history in the app's Settings, \
+             or set `keep_history = true` in .story-time/config.toml"
+        );
+    }
+    vault.snapshot(now)?;
+    match git::commit(vault)? {
+        Some(commit) => println!("Recorded: {}.", commit.message),
+        None => println!("Nothing new to record."),
+    }
+    Ok(())
+}
+
 pub fn backfill(vault: &Vault, now: NaiveDateTime, dry_run: bool) -> Result<()> {
     let filled = git::backfill(vault, now, !dry_run)?;
     let left_out = || {

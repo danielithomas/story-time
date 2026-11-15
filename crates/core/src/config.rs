@@ -27,6 +27,14 @@ const SUBMISSION_SETTINGS: [&str; 6] = [
     "# paper = \"a4\"",
 ];
 
+/// Documents the `keep_history` setting, which config files written before it lack.
+const HISTORY_SETTING: [&str; 4] = [
+    "",
+    "# Keep a history of every change, with git: the app records changes a few minutes after you stop",
+    "# writing and when it closes, and `story-time sync` records them whenever you run it.",
+    "# keep_history = true",
+];
+
 /// Introduces the `scratchpad` setting in the config file.
 const SCRATCHPAD_COMMENT: &str =
     "# The bookshelf's scratchpad: fragments not tied to any world (`story-time scrap add`).";
@@ -77,6 +85,10 @@ templates_dir = "templates"
 # Spellcheck language(s) for the desktop app's editor, as language_COUNTRY codes.
 # Defaults to the system language.
 # spelling = ["en_AU"]
+
+# Keep a history of every change, with git: the app records changes a few minutes after you stop
+# writing and when it closes, and `story-time sync` records them whenever you run it.
+# keep_history = true
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -95,6 +107,9 @@ pub struct Config {
     /// "a4" or "letter" for a submission; unset, it follows the spelling languages or locale.
     pub paper: Option<String>,
     pub spelling: Option<Vec<String>>,
+    /// Record every change in a git repository: the app does it a few minutes after writing stops
+    /// and when it closes, and `story-time sync` on demand.
+    pub keep_history: bool,
 }
 
 impl Default for Config {
@@ -111,6 +126,7 @@ impl Default for Config {
             contact: Vec::new(),
             paper: None,
             spelling: None,
+            keep_history: false,
         }
     }
 }
@@ -197,6 +213,7 @@ pub fn upgraded_config(text: &str) -> String {
             line.split_once('=').is_some_and(|(k, _)| k.trim() == key)
         })
     };
+    let documents_history = mentions("keep_history");
     if !mentions("contact") && !mentions("paper") {
         let author = lines.iter().position(|line| {
             let line = line.trim_start_matches(['#', ' ']);
@@ -205,6 +222,9 @@ pub fn upgraded_config(text: &str) -> String {
         });
         let at = author.map_or(lines.len(), |i| i + 1);
         lines.splice(at..at, SUBMISSION_SETTINGS.map(String::from));
+    }
+    if !documents_history {
+        lines.extend(HISTORY_SETTING.map(String::from));
     }
     let format = format!("format = {FORMAT}");
     match find(&lines, "format") {

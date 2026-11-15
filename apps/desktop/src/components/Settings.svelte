@@ -7,6 +7,7 @@
     chooseBookshelfPlace,
     chooseVault,
     saveSettings,
+    setKeepHistory,
     setTheme,
     setTypewriter,
     toastError,
@@ -57,6 +58,23 @@
     if (!settings) return;
     const picked = await chooseBookshelfPlace(settings.backupFolder);
     if (picked) await setBackup(settings.backup, picked);
+  }
+
+  let turning = $state(false);
+
+  async function keepHistory(on: boolean) {
+    turning = true;
+    settings = (await setKeepHistory(on)) ?? settings;
+    turning = false;
+  }
+
+  /** When a change was recorded, from its local time: "today at 9:41 pm" or "Sat 14 Nov at 9:41 pm". */
+  function when(at: string) {
+    const date = new Date(at);
+    const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const today = new Date().toDateString() === date.toDateString();
+    const day = date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+    return `${today ? "today" : day} at ${time}`;
   }
 
   const reveal = (path: string) => revealItemInDir(path).catch(toastError);
@@ -165,6 +183,38 @@
     </section>
 
     <section>
+      <h2>History</h2>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={settings.keepHistory}
+          disabled={turning}
+          onchange={(e) => keepHistory(e.currentTarget.checked)}
+        />
+        <span>Keep a history: record every change a few minutes after you stop writing, and when Story Time closes</span>
+      </label>
+      <p class="muted">
+        Earlier versions of your notes are kept with the bookshelf, inside its folder. Turning this off keeps what was
+        recorded.
+      </p>
+      {#if settings.syncedFolder}
+        <p class="warning">
+          This bookshelf is in {settings.syncedFolder}. {settings.syncedFolder} can damage a history while it copies the
+          folder, so keep a history only for a bookshelf outside {settings.syncedFolder}.
+        </p>
+      {/if}
+      {#if settings.keepHistory || settings.lastRecorded}
+        <p class="muted">
+          {#if settings.lastRecorded}
+            Last recorded {when(settings.lastRecorded.at)}: {settings.lastRecorded.message}.
+          {:else}
+            Nothing recorded yet.
+          {/if}
+        </p>
+      {/if}
+    </section>
+
+    <section>
       <h2>Appearance</h2>
       <label class="field narrow">
         <span>Colours</span>
@@ -262,6 +312,13 @@
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
+  }
+
+  .warning {
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    background: var(--danger-soft);
+    color: var(--danger);
   }
 
   .link {

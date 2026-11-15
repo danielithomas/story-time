@@ -22,6 +22,7 @@ import type {
   RenamedNote,
   ProjectSummary,
   ProjectTree,
+  Recorded,
   PropertyValue,
   SaveResult,
   ScenePlace,
@@ -47,6 +48,8 @@ export const api = {
     invoke<VaultInfo>("save_settings", args),
   /** `folder` null means Story Time's data folder. */
   setBackup: (on: boolean, folder: string | null) => invoke<SettingsInfo>("set_backup", { on, folder }),
+  setKeepHistory: (on: boolean) => invoke<SettingsInfo>("set_keep_history", { on }),
+  recordHistory: () => invoke<Recorded | null>("record_history"),
   choices: () => invoke<Choices>("choices"),
   listProjects: () => invoke<ProjectSummary[]>("list_projects"),
   projectTree: (slug: string, book: string | null) => invoke<ProjectTree>("project_tree", { slug, book }),

@@ -116,6 +116,8 @@ pub struct VaultInfo {
     needs_upgrade: bool,
     /// The vault is in a git repository, so its writing log can be filled in from its history.
     in_git: bool,
+    /// The vault keeps a history, which the app records a few minutes after writing stops.
+    keep_history: bool,
 }
 
 fn vault_info(vault: &Vault) -> VaultInfo {
@@ -129,6 +131,7 @@ fn vault_info(vault: &Vault) -> VaultInfo {
         daily_goal: vault.config.daily_goal,
         needs_upgrade: vault.config.needs_upgrade(),
         in_git: git::in_repository(&vault.root),
+        keep_history: vault.config.keep_history,
     }
 }
 
@@ -622,6 +625,28 @@ pub struct SettingsInfo {
     chosen_backup_folder: bool,
     /// The newest copy, if there is one.
     last_backup: Option<String>,
+    keep_history: bool,
+    /// The last change recorded in the bookshelf's history, if it has one.
+    last_recorded: Option<Recorded>,
+    /// The cloud storage service whose folder holds the bookshelf, such as OneDrive.
+    synced_folder: Option<String>,
+}
+
+/// A change recorded in the bookshelf's history.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recorded {
+    /// When, as `YYYY-MM-DDTHH:MM:SS`.
+    at: String,
+    /// What changed: "Arrival, The Landing and 2 other notes".
+    message: String,
+}
+
+fn recorded(commit: git::Commit) -> Recorded {
+    Recorded {
+        at: commit.at.format("%Y-%m-%dT%H:%M:%S").to_string(),
+        message: commit.message,
+    }
 }
 
 #[tauri::command]
@@ -641,7 +666,32 @@ pub async fn settings(state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
         backup_folder: folder.display().to_string(),
         chosen_backup_folder: chosen.is_some(),
         last_backup: last_backup.map(|path| path.display().to_string()),
+        keep_history: vault.config.keep_history,
+        // A history that can't be read, such as when git is missing, shows as none.
+        last_recorded: git::last_commit(&vault).ok().flatten().map(recorded),
+        synced_folder: git::synced_folder(&vault.root).map(String::from),
     })
+}
+
+/// Starts or stops keeping a history of the open bookshelf. Starting makes its repository if it
+/// has none, and records the bookshelf as it is.
+#[tauri::command]
+pub async fn set_keep_history(on: bool, state: State<'_, AppState>) -> CmdResult<SettingsInfo> {
+    let vault = state.vault()?;
+    if on {
+        git::start(&vault).or_message()?;
+    } else {
+        git::stop(&vault).or_message()?;
+    }
+    settings(state).await
+}
+
+/// Records the open bookshelf's changes in its history, if it keeps one. Returns what was
+/// recorded, or nothing if nothing but the writing log changed.
+#[tauri::command]
+pub async fn record_history(state: State<'_, AppState>) -> CmdResult<Option<Recorded>> {
+    let vault = state.vault()?;
+    Ok(git::commit(&vault).or_message()?.map(recorded))
 }
 
 /// Saves the bookshelf's settings in its config file, keeping the file's comments. An empty author

@@ -34,6 +34,8 @@ fn main() {
             commands::settings,
             commands::save_settings,
             commands::set_backup,
+            commands::set_keep_history,
+            commands::record_history,
             commands::choices,
             commands::list_projects,
             commands::project_tree,

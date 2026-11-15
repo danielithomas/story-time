@@ -25,6 +25,7 @@ import type {
   SceneRef,
   ScenePlace,
   SceneSpot,
+  SettingsInfo,
   TodayInfo,
   VaultInfo,
 } from "./types";
@@ -90,6 +91,8 @@ const PROPERTY_DELAY = 500;
 const COUNT_DELAY = 300;
 const REFRESH_DELAY = 1500;
 const SNAPSHOT_EVERY = 10 * 60 * 1000;
+/** How long after the last change a bookshelf that keeps a history records it. */
+const HISTORY_DELAY = 5 * 60 * 1000;
 
 let body = "";
 let bodyDirty = false;
@@ -98,6 +101,7 @@ let saveQueue: Promise<void> = Promise.resolve();
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let countTimer: ReturnType<typeof setTimeout> | undefined;
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+let historyTimer: ReturnType<typeof setTimeout> | undefined;
 
 const hasPending = () => bodyDirty || Object.keys(pendingProperties).length > 0;
 
@@ -129,8 +133,48 @@ export async function init() {
       return;
     }
     if (app.vault && !app.vault.needsUpgrade) await api.recordSnapshot().catch(() => {});
+    await recordHistory();
     await backUp(false);
   });
+}
+
+let historyError = "";
+
+/** Records the bookshelf's changes in its history, if it keeps one. A failure is shown once. */
+async function recordHistory() {
+  clearTimeout(historyTimer);
+  if (!app.vault?.keepHistory || app.vault.needsUpgrade) return;
+  try {
+    await api.recordHistory();
+    historyError = "";
+  } catch (error) {
+    const message = `Couldn't record this bookshelf's history: ${error}`;
+    if (message !== historyError) toast(message, undefined, "error");
+    historyError = message;
+  }
+}
+
+/** Records the history a few minutes after the last change, so a pause in writing makes one entry. */
+function scheduleHistory() {
+  if (!app.vault?.keepHistory) return;
+  clearTimeout(historyTimer);
+  historyTimer = setTimeout(() => void recordHistory(), HISTORY_DELAY);
+}
+
+/** Starts or stops keeping a history of the open bookshelf. */
+export async function setKeepHistory(on: boolean): Promise<SettingsInfo | null> {
+  try {
+    const settings = await api.setKeepHistory(on);
+    if (app.vault) {
+      app.vault.keepHistory = settings.keepHistory;
+      if (settings.keepHistory) app.vault.inGit = true;
+    }
+    if (!on) clearTimeout(historyTimer);
+    return settings;
+  } catch (error) {
+    toastError(error);
+    return null;
+  }
 }
 
 let backupError = "";
@@ -829,6 +873,7 @@ async function reloadIfChangedElsewhere() {
 }
 
 function scheduleRefresh() {
+  scheduleHistory();
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(async () => {
     try {

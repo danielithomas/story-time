@@ -1,7 +1,9 @@
-//! A bookshelf's git history, for a bookshelf kept in a git repository.
+//! A bookshelf's git history: keeping one (`keep_history`), and reading it.
 //!
-//! Story Time runs the `git` program and only reads the repository: a past commit is copied into
-//! a temporary folder, never checked out in the bookshelf, and nothing is committed.
+//! Story Time runs the installed `git` program, so the writer's own git settings, SSH keys and
+//! credential helpers work unchanged. A bookshelf that keeps a history is committed as a whole:
+//! every file in its folder, apart from what `.gitignore` leaves out. Reading past commits copies
+//! them into a temporary folder, never checking them out in the bookshelf.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,8 +14,12 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{NaiveDate, NaiveDateTime};
 
-use crate::config::{CONFIG_FILE, META_DIR};
+use crate::config::{self, CONFIG_FILE, META_DIR};
 use crate::history::{History, Snapshot};
+use crate::note::Note;
+use crate::scaffold::{BUILD_IGNORE, LOG_MERGE, add_line};
+use crate::text::name_from_file;
+use crate::upgrade::BACKUPS_IGNORE;
 use crate::vault::Vault;
 
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
@@ -21,6 +27,248 @@ const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 /// Whether the bookshelf is in a git repository: its folder, or one above it, holds `.git`.
 pub fn in_repository(root: &Path) -> bool {
     root.ancestors().any(|dir| dir.join(".git").exists())
+}
+
+/// Folders that cloud storage services keep in step between computers, by a folder name in the
+/// path, with the service's name.
+const SYNCED_FOLDERS: [(&str, &str); 7] = [
+    ("OneDrive", "OneDrive"),
+    ("Dropbox", "Dropbox"),
+    ("iCloud Drive", "iCloud Drive"),
+    ("iCloudDrive", "iCloud Drive"),
+    ("Mobile Documents", "iCloud Drive"),
+    ("Google Drive", "Google Drive"),
+    ("GoogleDrive", "Google Drive"),
+];
+
+/// The cloud storage service whose folder holds the bookshelf, if any, going by the folders in
+/// its path (`OneDrive`, `OneDrive - Company`, `Dropbox` and so on). A git repository in such a
+/// folder can be damaged when the service and git write to it at once.
+pub fn synced_folder(root: &Path) -> Option<&'static str> {
+    root.components().find_map(|component| {
+        let name = component.as_os_str().to_string_lossy();
+        SYNCED_FOLDERS
+            .iter()
+            .find(|(folder, _)| {
+                name.strip_prefix(folder)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '-']))
+            })
+            .map(|(_, service)| *service)
+    })
+}
+
+/// A commit that recorded changes to the bookshelf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    /// When, on the clock of the computer that made it.
+    pub at: NaiveDateTime,
+    /// What changed, as its message says: "Arrival, The Landing and 2 other notes".
+    pub message: String,
+}
+
+/// Starts keeping a history: sets `keep_history`, and records the bookshelf as it is, making its
+/// repository first if it has none.
+pub fn start(vault: &Vault) -> Result<Option<Commit>> {
+    config::set_bookshelf_setting(
+        &vault.root,
+        "keep_history",
+        Some(toml::Value::Boolean(true)),
+    )?;
+    let vault = Vault::open(&vault.root)?;
+    prepare(&vault.root)?;
+    commit(&vault)
+}
+
+/// Stops keeping a history. What was recorded stays in the bookshelf's repository.
+pub fn stop(vault: &Vault) -> Result<()> {
+    config::set_bookshelf_setting(&vault.root, "keep_history", None)
+}
+
+/// Records the bookshelf's changes in its history, if it keeps one, and returns the commit made.
+/// Nothing is recorded when nothing but the writing log changed: the log goes with the next
+/// change. In a repository that holds more than the bookshelf, only the bookshelf is committed.
+pub fn commit(vault: &Vault) -> Result<Option<Commit>> {
+    if !vault.config.keep_history {
+        return Ok(None);
+    }
+    let root = &vault.root;
+    if !has_repository(root)? {
+        prepare(root)?;
+    }
+    run(git(root).args(["add", "--all", "--", "."]))?;
+    let staged = run(git(root).args([
+        "diff",
+        "--cached",
+        "--name-status",
+        "-z",
+        "--no-renames",
+        "--relative",
+    ]))?;
+    let log = format!("{META_DIR}/history.csv");
+    let fields: Vec<&str> = staged.split('\0').collect();
+    let changed: Vec<(&str, &str)> = fields
+        .chunks(2)
+        .filter_map(|pair| match pair {
+            [status, path] if !path.is_empty() && *path != log => Some((*status, *path)),
+            _ => None,
+        })
+        .collect();
+    if changed.is_empty() {
+        return Ok(None);
+    }
+    let (subject, body) = message(vault, &changed);
+    let mut command = git(root);
+    command
+        .args(identity(vault))
+        .args(["commit", "--quiet", "-m", &subject]);
+    if let Some(body) = &body {
+        command.args(["-m", body]);
+    }
+    run(command.args(["--", "."]))?;
+    last_commit(vault)
+}
+
+/// The last commit that changed the bookshelf, if it has a history.
+pub fn last_commit(vault: &Vault) -> Result<Option<Commit>> {
+    let root = &vault.root;
+    if !has_repository(root)?
+        || run(git(root).args(["rev-parse", "--verify", "--quiet", "HEAD"])).is_err()
+    {
+        return Ok(None);
+    }
+    let found = run(git(root).args([
+        "log",
+        "-1",
+        "--format=%cd%x00%s",
+        "--date=format:%Y-%m-%dT%H:%M:%S",
+        "HEAD",
+        "--",
+        ".",
+    ]))?;
+    Ok(found
+        .trim_end()
+        .split_once('\0')
+        .and_then(|(time, message)| {
+            Some(Commit {
+                at: NaiveDateTime::parse_from_str(time, TIME_FORMAT).ok()?,
+                message: message.to_string(),
+            })
+        }))
+}
+
+/// Whether the bookshelf has a repository of its own, or is tracked in one around it. A
+/// repository around it that doesn't track it, such as one for the files in a home folder,
+/// isn't its history.
+fn has_repository(root: &Path) -> Result<bool> {
+    if root.join(".git").exists() {
+        return Ok(true);
+    }
+    if !in_repository(root) {
+        return Ok(false);
+    }
+    let tracked = run(git(root).args(["ls-files", "--", "."]))?;
+    Ok(!tracked.trim().is_empty())
+}
+
+/// Makes the bookshelf a repository if it isn't one, and gives it the `.gitignore` and
+/// `.gitattributes` lines story-time needs: compiled manuscripts and upgrade backups are left
+/// out, and the writing log merges by keeping both computers' lines.
+fn prepare(root: &Path) -> Result<()> {
+    if !has_repository(root)? {
+        run(git(root).args(["-c", "init.defaultBranch=main", "init", "--quiet"]))?;
+    }
+    add_line(&root.join(".gitignore"), BUILD_IGNORE)?;
+    add_line(&root.join(".gitignore"), BACKUPS_IGNORE)?;
+    add_line(&root.join(".gitattributes"), LOG_MERGE)?;
+    Ok(())
+}
+
+/// The note names a commit message gives before counting the rest.
+const NAMED: usize = 3;
+
+/// A commit's message for these changes (git's status letter and a path relative to the
+/// bookshelf): the names of the notes that changed, then settings or other files, with every note
+/// named in the body when the subject can't name them all. A deleted note is named as it was in
+/// the last commit.
+fn message(vault: &Vault, changed: &[(&str, &str)]) -> (String, Option<String>) {
+    let config = format!("{META_DIR}/{CONFIG_FILE}");
+    let templates = format!("{}/", vault.config.templates_dir.trim_end_matches('/'));
+    let mut notes: Vec<String> = Vec::new();
+    let (mut settings, mut others) = (false, false);
+    for &(status, path) in changed {
+        let hidden = path.split('/').any(|part| part.starts_with('.'));
+        if path == config {
+            settings = true;
+        } else if path.ends_with(".md") && !hidden && !path.starts_with(&templates) {
+            let file = vault.root.join(path);
+            let text = if status == "D" {
+                run(git(&vault.root).args(["show", &format!("HEAD:./{path}")]))
+            } else {
+                fs::read_to_string(&file).map_err(Into::into)
+            };
+            let name = text
+                .map(|text| Note::parse(&file, &text).title())
+                .unwrap_or_else(|_| {
+                    name_from_file(&file.file_stem().unwrap_or_default().to_string_lossy())
+                });
+            if !notes.contains(&name) {
+                notes.push(name);
+            }
+        } else {
+            others = true;
+        }
+    }
+    let mut items: Vec<String> = if notes.len() > NAMED {
+        let mut items = notes[..NAMED - 1].to_vec();
+        items.push(format!("{} other notes", notes.len() - (NAMED - 1)));
+        items
+    } else {
+        notes.clone()
+    };
+    if settings {
+        items.push("settings".to_string());
+    }
+    if others {
+        items.push("other files".to_string());
+    }
+    let subject = match items.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+        None => String::new(),
+    };
+    let mut chars = subject.chars();
+    let subject = chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default();
+    let body = (notes.len() > NAMED).then(|| notes.join("\n"));
+    (subject, body)
+}
+
+/// Settings that name a commit's author, for a computer whose git doesn't say who is writing:
+/// the bookshelf's `author`, else Story Time.
+fn identity(vault: &Vault) -> Vec<String> {
+    let set = |key: &str| {
+        run(git(&vault.root).args(["config", "--get", key]))
+            .is_ok_and(|value| !value.trim().is_empty())
+    };
+    let mut settings = Vec::new();
+    if !set("user.name") {
+        let name = vault
+            .config
+            .author
+            .clone()
+            .filter(|author| !author.trim().is_empty())
+            .unwrap_or_else(|| "Story Time".to_string());
+        settings.extend(["-c".to_string(), format!("user.name={name}")]);
+    }
+    if !set("user.email") {
+        settings.extend([
+            "-c".to_string(),
+            "user.email=story-time@localhost".to_string(),
+        ]);
+    }
+    settings
 }
 
 /// What filling in the writing log from git history found.
@@ -187,7 +435,8 @@ impl Repository {
 }
 
 /// `git`, run in `dir`. The variables a git hook sets are cleared, so the repository is found from
-/// the folder, and settings that would change what git prints or copies are turned off.
+/// the folder; git never waits for a password typed in a terminal; and settings that would change
+/// what git prints or copies are turned off.
 fn git(dir: &Path) -> Command {
     let mut command = Command::new("git");
     command
@@ -195,6 +444,7 @@ fn git(dir: &Path) -> Command {
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
+        .env("GIT_TERMINAL_PROMPT", "0")
         // Files kept with Git LFS aren't notes, so there's no need to download them.
         .env("GIT_LFS_SKIP_SMUDGE", "1")
         .args([
@@ -203,12 +453,20 @@ fn git(dir: &Path) -> Command {
             "-c",
             "core.sparseCheckout=false",
         ]);
+    // Tests run away from this computer's git settings.
+    #[cfg(test)]
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", dir.join(".no-gitconfig"));
     command
 }
 
 fn run(command: &mut Command) -> Result<String> {
     let output = command.output().map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => anyhow!("git isn't installed, or isn't on the PATH"),
+        io::ErrorKind::NotFound => anyhow!(
+            "keeping a history needs Git, a free program that isn't installed on this computer. \
+             Install it from https://git-scm.com and try again"
+        ),
         _ => anyhow!(e).context("running git"),
     })?;
     if !output.status.success() {
@@ -252,7 +510,7 @@ mod tests {
         );
     }
 
-    fn commit(repo: &Path, date: &str) {
+    fn commit_on(repo: &Path, date: &str) {
         git_in(repo, &["add", "-A"], date);
         git_in(
             repo,
@@ -295,7 +553,7 @@ mod tests {
             "An Obsidian note, before story-time.\n",
         )
         .unwrap();
-        commit(&repo, "2026-03-01T09:00:00+11:00");
+        commit_on(&repo, "2026-03-01T09:00:00+11:00");
 
         init_vault(&root, false).unwrap();
         let vault = Vault::open(&root).unwrap();
@@ -348,17 +606,17 @@ mod tests {
         }
         let r = repo();
         r.write(100);
-        commit(&r.repo, "2026-03-02T10:00:00+11:00");
+        commit_on(&r.repo, "2026-03-02T10:00:00+11:00");
         r.write(250);
-        commit(&r.repo, "2026-03-03T09:00:00+11:00");
+        commit_on(&r.repo, "2026-03-03T09:00:00+11:00");
         r.write(400);
-        commit(&r.repo, "2026-03-03T23:30:00+11:00");
+        commit_on(&r.repo, "2026-03-03T23:30:00+11:00");
         fs::write(r.repo.join("notes.md"), "Outside the bookshelf.\n").unwrap();
-        commit(&r.repo, "2026-03-04T12:00:00+11:00");
+        commit_on(&r.repo, "2026-03-04T12:00:00+11:00");
         r.write(450);
-        commit(&r.repo, "2026-03-05T08:00:00-05:00");
+        commit_on(&r.repo, "2026-03-05T08:00:00-05:00");
         r.write(9999);
-        commit(&r.repo, "2026-03-09T08:00:00+11:00");
+        commit_on(&r.repo, "2026-03-09T08:00:00+11:00");
 
         let now = time("2026-03-06T12:00:00");
         let looked = backfill(&r.vault, now, false).unwrap();
@@ -408,10 +666,10 @@ mod tests {
         }
         let r = repo();
         r.write(100);
-        commit(&r.repo, "2026-03-02T10:00:00+11:00");
+        commit_on(&r.repo, "2026-03-02T10:00:00+11:00");
         r.vault.snapshot(time("2026-03-02T21:00:00")).unwrap();
         r.write(300);
-        commit(&r.repo, "2026-03-03T22:00:00+11:00");
+        commit_on(&r.repo, "2026-03-03T22:00:00+11:00");
         r.write(350);
         r.vault.snapshot(time("2026-03-04T21:00:00")).unwrap();
 
@@ -449,13 +707,13 @@ mod tests {
         let vault = Vault::open(root).unwrap();
         fs::create_dir_all(vault.scratchpad_dir()).unwrap();
         fs::write(vault.scratchpad_dir().join("line.md"), "one two three\n").unwrap();
-        commit(root, "2026-03-01T10:00:00+11:00");
+        commit_on(root, "2026-03-01T10:00:00+11:00");
         fs::write(
             vault.scratchpad_dir().join("line.md"),
             "one two three four\n",
         )
         .unwrap();
-        commit(root, "2026-03-02T10:00:00+11:00");
+        commit_on(root, "2026-03-02T10:00:00+11:00");
         let filled = backfill(&vault, time("2026-03-03T09:00:00"), true).unwrap();
         assert_eq!(filled.days, [day("2026-03-01"), day("2026-03-02")]);
         assert_eq!(filled.changed, [(day("2026-03-02"), 0, 1)]);
@@ -480,5 +738,228 @@ mod tests {
         );
         let filled = backfill(&vault, time("2026-03-03T09:00:00"), true).unwrap();
         assert!(filled.days.is_empty(), "no commits yet");
+    }
+
+    /// A bookshelf, outside any repository, with a world whose book has two scenes.
+    fn shelf(root: &Path) -> (Vault, PathBuf, PathBuf) {
+        use crate::contents::Place;
+        use crate::project::Form;
+        use crate::scaffold::{NewBook, NewProject, add_scene, create_project, init_vault};
+        use crate::structures::THREE_ACT;
+
+        fs::create_dir_all(root).unwrap();
+        init_vault(root, false).unwrap();
+        let vault = Vault::open(root).unwrap();
+        let new = NewProject {
+            world: None,
+            book: NewBook {
+                title: "Sample Story",
+                form: Form::Novel,
+                target: None,
+                structure: &THREE_ACT,
+                premise: None,
+            },
+        };
+        let (project, book) = create_project(&vault, &new, day("2026-03-02")).unwrap();
+        let scene = |name| {
+            let book = crate::Book::load(&book.dir, &project.slug)
+                .unwrap()
+                .unwrap();
+            add_scene(&vault, &project, &book, name, Place::End, day("2026-03-02"))
+                .unwrap()
+                .path
+        };
+        let arrival = scene("Arrival");
+        let leaving = scene("Leaving Home");
+        (vault, arrival, leaving)
+    }
+
+    fn reopen(vault: &Vault) -> Vault {
+        Vault::open(&vault.root).unwrap()
+    }
+
+    /// What git says about the bookshelf's repository, from `dir`.
+    fn ask(dir: &Path, args: &[&str]) -> String {
+        run(git(dir).args(args)).unwrap()
+    }
+
+    #[test]
+    fn keeps_a_history_once_started() {
+        if !has_git() {
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let (vault, arrival, leaving) = shelf(dir.path());
+        let root = &vault.root;
+        assert_eq!(commit(&vault).unwrap(), None, "off until started");
+        assert!(!root.join(".git").exists());
+        assert_eq!(last_commit(&vault).unwrap(), None);
+
+        let first = start(&vault).unwrap().expect("the bookshelf as it was");
+        let vault = reopen(&vault);
+        assert!(vault.config.keep_history);
+        assert!(root.join(".git").is_dir());
+        let ignored = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(ignored.contains(BUILD_IGNORE) && ignored.contains(BACKUPS_IGNORE));
+        assert!(
+            fs::read_to_string(root.join(".gitattributes"))
+                .unwrap()
+                .contains(LOG_MERGE)
+        );
+        assert!(
+            first
+                .message
+                .ends_with(" other notes, settings and other files"),
+            "{}",
+            first.message
+        );
+        assert_eq!(
+            ask(root, &["status", "--porcelain"]),
+            "",
+            "everything recorded"
+        );
+        assert_eq!(
+            ask(root, &["log", "-1", "--format=%an <%ae>"]).trim(),
+            "Story Time <story-time@localhost>",
+            "this computer's git doesn't say who is writing"
+        );
+        let body = ask(root, &["log", "-1", "--format=%b"]);
+        assert!(
+            body.lines().any(|line| line == "Arrival")
+                && body.lines().any(|line| line == "Leaving Home"),
+            "every note is named in the body: {body}"
+        );
+
+        let text = fs::read_to_string(&arrival).unwrap();
+        fs::write(&arrival, format!("{text}\nShe came ashore.\n")).unwrap();
+        let edited = commit(&vault).unwrap().unwrap();
+        assert_eq!(edited.message, "Arrival");
+        assert_eq!(last_commit(&vault).unwrap(), Some(edited));
+
+        vault.snapshot(time("2026-03-03T21:00:00")).unwrap();
+        assert_eq!(
+            commit(&vault).unwrap(),
+            None,
+            "the writing log waits for the next change"
+        );
+        fs::remove_file(&leaving).unwrap();
+        fs::write(&arrival, "# Arrival\n\nShe came ashore at dawn.\n").unwrap();
+        config::set_bookshelf_setting(root, "daily_goal", Some(toml::Value::Integer(800))).unwrap();
+        let vault = reopen(&vault);
+        let several = commit(&vault).unwrap().unwrap();
+        assert_eq!(several.message, "Arrival, Leaving Home and settings");
+        assert!(
+            ask(root, &["show", "--stat", "--format=", "HEAD"]).contains("history.csv"),
+            "the writing log went with it"
+        );
+
+        stop(&vault).unwrap();
+        let vault = reopen(&vault);
+        assert!(!vault.config.keep_history);
+        fs::write(&arrival, "# Arrival\n\nShe came ashore at noon.\n").unwrap();
+        assert_eq!(commit(&vault).unwrap(), None, "stopped");
+        assert!(root.join(".git").is_dir(), "what was recorded stays");
+    }
+
+    #[test]
+    fn names_a_few_notes_and_counts_the_rest() {
+        if !has_git() {
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let (vault, _, _) = shelf(dir.path());
+        start(&vault).unwrap();
+        let vault = reopen(&vault);
+        let scenes = vault
+            .root
+            .join("sample-story-world/books/sample-story/scenes");
+        for name in ["a", "b", "c", "d"] {
+            fs::write(
+                scenes.join(format!("{name}.md")),
+                format!("# Scene {name}\n"),
+            )
+            .unwrap();
+        }
+        let made = commit(&vault).unwrap().unwrap();
+        assert_eq!(made.message, "Scene a, Scene b and 2 other notes");
+        assert_eq!(
+            ask(&vault.root, &["log", "-1", "--format=%b"]).trim(),
+            "Scene a\nScene b\nScene c\nScene d"
+        );
+    }
+
+    #[test]
+    fn commits_only_the_bookshelf_in_a_repository_that_holds_more() {
+        if !has_git() {
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path();
+        git_in(repo, &["init", "--quiet"], "2026-03-01T09:00:00+11:00");
+        let (vault, arrival, _) = shelf(&repo.join("stories"));
+        fs::write(repo.join("other.md"), "Not a story.\n").unwrap();
+        commit_on(repo, "2026-03-01T10:00:00+11:00");
+        assert!(
+            has_repository(&vault.root).unwrap(),
+            "tracked in the repository around it"
+        );
+
+        start(&vault).unwrap();
+        let vault = reopen(&vault);
+        assert!(
+            !vault.root.join(".git").exists(),
+            "no repository of its own"
+        );
+        fs::write(repo.join("other.md"), "Still not a story.\n").unwrap();
+        git_in(repo, &["add", "other.md"], "2026-03-01T11:00:00+11:00");
+        fs::write(&arrival, "# Arrival\n\nShe came ashore.\n").unwrap();
+        assert_eq!(commit(&vault).unwrap().unwrap().message, "Arrival");
+        assert_eq!(
+            ask(repo, &["status", "--porcelain"]),
+            "M  other.md\n",
+            "what's outside the bookshelf is left as it was"
+        );
+    }
+
+    #[test]
+    fn makes_its_own_repository_inside_one_that_doesnt_track_it() {
+        if !has_git() {
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        git_in(home, &["init", "--quiet"], "2026-03-01T09:00:00+11:00");
+        fs::write(home.join(".profile"), "export EDITOR=vi\n").unwrap();
+        commit_on(home, "2026-03-01T10:00:00+11:00");
+        let (vault, _, _) = shelf(&home.join("Documents/Stories"));
+        assert!(!has_repository(&vault.root).unwrap());
+        start(&vault).unwrap();
+        assert!(vault.root.join(".git").is_dir());
+        assert_eq!(
+            ask(home, &["log", "--oneline"]).lines().count(),
+            1,
+            "home untouched"
+        );
+    }
+
+    #[test]
+    fn knows_cloud_storage_folders() {
+        let named = |path: &str| synced_folder(Path::new(path));
+        assert_eq!(named("/home/writer/OneDrive/Stories"), Some("OneDrive"));
+        assert_eq!(
+            named("C:/Users/writer/OneDrive - Example Ltd/Stories"),
+            Some("OneDrive")
+        );
+        assert_eq!(
+            named("/Users/writer/Library/CloudStorage/OneDrive-Personal/Stories"),
+            Some("OneDrive")
+        );
+        assert_eq!(named("/Users/writer/Dropbox/Stories"), Some("Dropbox"));
+        assert_eq!(
+            named("/Users/writer/Library/Mobile Documents/com~apple~CloudDocs/Stories"),
+            Some("iCloud Drive")
+        );
+        assert_eq!(named("/home/writer/Documents/Stories"), None);
+        assert_eq!(named("/home/writer/OneDrivers/Stories"), None);
     }
 }

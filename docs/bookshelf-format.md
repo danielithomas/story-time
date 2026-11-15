@@ -20,7 +20,8 @@ bookshelf/                          one bookshelf per git repository
 ├── .story-time/
 │   ├── config.toml                 settings for this bookshelf
 │   ├── history.csv                 the writing log
-│   └── build/                      compiled manuscripts (not committed)
+│   ├── build/                      compiled manuscripts (not committed)
+│   └── backups/                    the bookshelf before an upgrade (not committed)
 ├── .gitattributes
 ├── .gitignore
 ├── templates/                      note templates, shared with Obsidian
@@ -191,10 +192,15 @@ ideas_file = "scratchpad/ideas.md"
 scratchpad = "scratchpad"             # the bookshelf's scratchpad folder
 templates_dir = "templates"
 # author = "Your Name"                # printed on compiled manuscripts
+# contact = ["12 Example Street", "you@example.com"]   # under the author's name on a manuscript
+# paper = "a4"                        # a manuscript's paper, "a4" or "letter"
 # spelling = ["en_AU"]                # the editor's spellcheck languages
+# keep_history = true                 # record every change with git
 ```
 
-Settings added by later features, such as git (#22), are documented with them.
+Every setting is optional: a missing one takes its default, shown above (`author`, `contact`, `paper` and `spelling` have none; `keep_history` is off). story-time ignores settings it doesn't know, so a later version can add one without a new format. `paper` unset follows the spelling languages or locale: letter for the United States and Canada, A4 elsewhere.
+
+**A bookshelf that keeps a history** (`keep_history = true`) is a git repository, or is tracked by one around it. story-time commits the whole bookshelf folder, apart from what `.gitignore` leaves out, a few minutes after writing stops, when the app closes, and on `story-time sync`. Each commit's message names the notes that changed. Anything else that works with git can work in the same repository. Turning the setting off stops the commits and keeps the history.
 
 **`.story-time/history.csv`** is the writing log. It is append-only and never rewritten. Each row is `timestamp,id,words`: a local time (`2026-11-05T21:09:00`), what was measured, and its word count at that moment.
 
@@ -202,7 +208,7 @@ Settings added by later features, such as git (#22), are documented with them.
 - A row is added whenever a count has changed since the last row for it.
 - Logs started before format 1 have the header `timestamp,project,words` and project folder names in the second column. Those rows stay readable.
 
-**`.story-time/build/`** holds compiled manuscripts and is listed in `.gitignore`.
+**`.story-time/build/`** holds compiled manuscripts, and **`.story-time/backups/`** the copies an upgrade makes before it changes anything. In a bookshelf kept in git, `.gitignore` lists both, so neither is committed.
 
 **`.gitattributes`** holds `.story-time/history.csv merge=union`, so when two machines both add to the log, git keeps both sets of lines instead of reporting a conflict.
 

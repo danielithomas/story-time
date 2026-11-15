@@ -8,6 +8,8 @@ export interface VaultInfo {
   needsUpgrade: boolean;
   /** In a git repository, so its writing log can be filled in from its history. */
   inGit: boolean;
+  /** Keeps a history, which the app records a few minutes after writing stops. */
+  keepHistory: boolean;
 }
 
 /** What filling in the writing log from git history did. */
@@ -34,6 +36,19 @@ export interface SettingsInfo {
   chosenBackupFolder: boolean;
   /** The newest copy, if there is one. */
   lastBackup: string | null;
+  keepHistory: boolean;
+  /** The last change recorded in the bookshelf's history, if it has one. */
+  lastRecorded: Recorded | null;
+  /** The cloud storage service whose folder holds the bookshelf, such as OneDrive. */
+  syncedFolder: string | null;
+}
+
+/** A change recorded in the bookshelf's history. */
+export interface Recorded {
+  /** When, as YYYY-MM-DDTHH:MM:SS. */
+  at: string;
+  /** What changed: "Arrival, The Landing and 2 other notes". */
+  message: string;
 }
 
 /** A folder the writer picked, before it opens. */

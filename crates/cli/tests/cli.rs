@@ -681,3 +681,61 @@ fn fills_in_the_writing_log_from_git() {
         String::from_utf8_lossy(&refused.stderr)
     );
 }
+
+#[test]
+fn keeps_a_history() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let story_time = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_story-time"))
+            .args(args)
+            .current_dir(root)
+            .env_remove("STORY_TIME_BOOKSHELF")
+            .env_remove("STORY_TIME_VAULT")
+            .env("GIT_CONFIG_GLOBAL", root.join(".no-gitconfig"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap()
+    };
+    ok(root, &["init"]);
+    ok(root, &["new", "Sample Story"]);
+    let off = story_time(&["sync"]);
+    assert!(!off.status.success());
+    assert!(
+        String::from_utf8_lossy(&off.stderr).contains("doesn't keep a history"),
+        "{}",
+        String::from_utf8_lossy(&off.stderr)
+    );
+
+    let config = root.join(".story-time/config.toml");
+    let text = fs::read_to_string(&config).unwrap();
+    assert!(
+        text.contains("# keep_history = true"),
+        "documented in the config file"
+    );
+    fs::write(
+        &config,
+        text.replace("# keep_history = true", "keep_history = true"),
+    )
+    .unwrap();
+    let first = story_time(&["sync"]);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(root.join(".git").is_dir(), "the repository is made");
+    let said = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        said.starts_with("Recorded: ") && said.ends_with(", settings and other files.\n"),
+        "{said}"
+    );
+    let again = story_time(&["sync"]);
+    assert_eq!(
+        String::from_utf8_lossy(&again.stdout),
+        "Nothing new to record.\n"
+    );
+}
