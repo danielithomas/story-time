@@ -64,6 +64,35 @@ export interface WaitingNote {
 }
 
 /** A change recorded in the bookshelf's history. */
+/** Two versions of a note compared: this computer's ("here") and another computer's. */
+export interface Compared {
+  /** Identifies this computer's version as it was compared. */
+  hash: string;
+  properties: PropertyDifference[];
+  parts: ComparedPart[];
+}
+
+export interface PropertyDifference {
+  key: string;
+  /** `null` where the property isn't set. */
+  here: PropertyValue | null;
+  other: PropertyValue | null;
+}
+
+/** A stretch of the body that reads the same in both versions, or sentences that differ. */
+export type ComparedPart =
+  | { kind: "same"; text: string }
+  | { kind: "different"; here: ComparedPiece[]; other: ComparedPiece[] };
+
+export interface ComparedPiece {
+  text: string;
+  /** These words differ from the other version's. */
+  differs: boolean;
+}
+
+/** What to keep at a difference: this computer's sentences, the other's, or both, this one's first. */
+export type Pick = "here" | "other" | "both";
+
 export interface Recorded {
   /** When, as YYYY-MM-DDTHH:MM:SS. */
   at: string;

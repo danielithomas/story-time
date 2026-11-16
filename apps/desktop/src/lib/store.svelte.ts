@@ -15,9 +15,11 @@ import type {
   ChapterRef,
   ChapterSpot,
   Choices,
+  Compared,
   FolderInfo,
   NoteDoc,
   NoteRef,
+  Pick,
   ProjectSummary,
   ProjectTree,
   PropertyValue,
@@ -95,7 +97,19 @@ export const app = $state({
     error: "",
     waiting: [] as WaitingNote[],
   },
+  /** The open note's two versions, compared, with what to keep from each. */
+  compare: null as Comparing | null,
 });
+
+export interface Comparing {
+  path: string;
+  compared: Compared;
+  /** What to keep at each difference in the body, in order. */
+  picks: Pick[];
+  /** The properties to take the other computer's value of. */
+  takeOther: string[];
+  saving: boolean;
+}
 
 const SAVE_DELAY = 800;
 const PROPERTY_DELAY = 500;
@@ -240,6 +254,7 @@ async function broughtIn(changed: string[]) {
 async function loadWaiting() {
   try {
     app.sync.waiting = app.vault?.keepHistory ? await api.waitingNotes() : [];
+    if (app.compare && !app.sync.waiting.some((waiting) => waiting.path === app.compare?.path)) app.compare = null;
   } catch {
     // Unknown until the next sync.
   }
@@ -268,6 +283,44 @@ export async function decideVersion(useOther: boolean) {
     toast(useOther ? "Now using the other computer's version." : "Kept this computer's version.");
     scheduleRefresh();
   } catch (error) {
+    toastError(error);
+  }
+}
+
+/** Compares the open note's two versions, once it is saved. Everything starts as this computer's. */
+export async function compareVersions() {
+  const doc = app.doc;
+  if (!doc || !(await settle())) return;
+  try {
+    const compared = await api.compareVersions(doc.path);
+    const differences = compared.parts.filter((part) => part.kind === "different").length;
+    app.compare = { path: doc.path, compared, picks: Array(differences).fill("here"), takeOther: [], saving: false };
+  } catch (error) {
+    toastError(error);
+  }
+}
+
+export function closeCompare() {
+  app.compare = null;
+}
+
+/** Saves the open note as put together from its two versions, which settles them. */
+export async function saveCompared() {
+  const compare = app.compare;
+  if (!compare || compare.saving || !(await settle())) return;
+  compare.saving = true;
+  try {
+    const { path, compared } = compare;
+    const takeOther = $state.snapshot(compare.takeOther);
+    const picks = $state.snapshot(compare.picks);
+    await withSavesHeld(() => api.combineVersions(path, compared.hash, takeOther, picks));
+    app.compare = null;
+    setDoc(await api.readNote(path));
+    await loadWaiting();
+    toast("Saved. Your other computers will have this version once they sync.");
+    scheduleRefresh();
+  } catch (error) {
+    compare.saving = false;
     toastError(error);
   }
 }
@@ -549,6 +602,8 @@ export async function openNote(path: string, show = true) {
 }
 
 function setDoc(doc: NoteDoc) {
+  // A comparison made from another note, or from this one before it changed, no longer applies.
+  if (app.compare && (app.compare.path !== doc.path || app.compare.compared.hash !== doc.hash)) app.compare = null;
   app.doc = doc;
   body = doc.body;
   bodyDirty = false;
@@ -559,6 +614,7 @@ function setDoc(doc: NoteDoc) {
 }
 
 function clearDoc() {
+  app.compare = null;
   app.doc = null;
   body = "";
   bodyDirty = false;

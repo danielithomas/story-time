@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
   import { createEditor, type ProseEditor } from "../lib/editor";
-  import { api } from "../lib/api";
-  import { app, decideVersion, edited, keepMine, takeTheirs, toastError } from "../lib/store.svelte";
+  import { app, compareVersions, decideVersion, edited, keepMine, takeTheirs } from "../lib/store.svelte";
+  import Compare from "./Compare.svelte";
 
   let host: HTMLDivElement;
   let editor: ProseEditor | undefined;
@@ -26,30 +26,15 @@
     });
   });
 
-  // A note changed here and on another computer before they synced: the other version, once asked for.
+  // A note changed here and on another computer before they synced, and its two versions compared.
   const twoVersions = $derived(!!app.doc && app.sync.waiting.some((waiting) => waiting.path === app.doc?.path));
-  let other = $state<{ path: string; text: string } | null>(null);
+  const comparing = $derived(twoVersions && !!app.compare && app.compare.path === app.doc?.path);
   let choosing = $state(false);
-
-  async function showOther() {
-    const path = app.doc?.path;
-    if (!path) return;
-    if (other?.path === path) {
-      other = null;
-      return;
-    }
-    try {
-      other = { path, text: await api.otherVersion(path) };
-    } catch (error) {
-      toastError(error);
-    }
-  }
 
   async function choose(useOther: boolean) {
     choosing = true;
     await decideVersion(useOther);
     choosing = false;
-    other = null;
   }
 
   const kindLabels: Record<string, string> = {
@@ -82,24 +67,25 @@
       <button class="btn primary" onclick={keepMine}>Keep mine</button>
     </div>
   {/if}
-  {#if twoVersions && app.saveState !== "conflict"}
-    <div class="conflict" role="alert">
-      <span>
-        This note was changed here and on another computer before they synced. Story Time kept this computer's
-        version.
-      </span>
-      <button class="btn" onclick={showOther}>{other?.path === app.doc?.path ? "Hide" : "Show"} the other version</button>
-      <button class="btn" disabled={choosing} onclick={() => choose(true)}>Use the other version</button>
-      <button class="btn primary" disabled={choosing} onclick={() => choose(false)}>Keep this one</button>
-    </div>
-    {#if other && other.path === app.doc?.path}
-      <div class="other" aria-label="The other computer's version">{other.text}</div>
+  {#if comparing}
+    <Compare />
+  {:else}
+    {#if twoVersions && app.saveState !== "conflict"}
+      <div class="conflict" role="alert">
+        <span>
+          This note was changed here and on another computer before they synced. Story Time kept this computer's
+          version.
+        </span>
+        <button class="btn" onclick={compareVersions}>Compare the two</button>
+        <button class="btn" disabled={choosing} onclick={() => choose(true)}>Use the other version</button>
+        <button class="btn primary" disabled={choosing} onclick={() => choose(false)}>Keep this one</button>
+      </div>
+    {/if}
+    {#if !app.focus}
+      <div class="trail">{trail}</div>
     {/if}
   {/if}
-  {#if !app.focus}
-    <div class="trail">{trail}</div>
-  {/if}
-  <div class="editor" bind:this={host}></div>
+  <div class="editor" class:hidden={comparing} bind:this={host}></div>
 </section>
 
 <style>
@@ -138,15 +124,7 @@
     flex: 1;
   }
 
-  .other {
-    flex: none;
-    max-height: 40%;
-    overflow-y: auto;
-    padding: 1rem 1.5rem;
-    white-space: pre-wrap;
-    font-family: var(--serif);
-    background: var(--bg);
-    border-bottom: 1px solid var(--line);
-    color: var(--muted);
+  .editor.hidden {
+    display: none;
   }
 </style>

@@ -10,6 +10,7 @@ use chrono::{Days, Local};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use story_time_core::backup;
+use story_time_core::compare;
 use story_time_core::compile::{self, Format};
 use story_time_core::contents::{self, ChapterSpot, Contents, Moved, Place, Spot};
 use story_time_core::delete;
@@ -469,16 +470,15 @@ fn properties_json(note: &Note) -> Map<String, Value> {
     note.frontmatter
         .entries()
         .into_iter()
-        .map(|(key, value)| {
-            let value = match value {
-                PropertyValue::Text(text) => Value::String(text),
-                PropertyValue::List(items) => {
-                    Value::Array(items.into_iter().map(Value::String).collect())
-                }
-            };
-            (key, value)
-        })
+        .map(|(key, value)| (key, property_json(value)))
         .collect()
+}
+
+fn property_json(value: PropertyValue) -> Value {
+    match value {
+        PropertyValue::Text(text) => Value::String(text),
+        PropertyValue::List(items) => Value::Array(items.into_iter().map(Value::String).collect()),
+    }
 }
 
 fn property_value(value: &Value) -> PropertyValue {
@@ -780,13 +780,117 @@ pub async fn waiting_notes(state: State<'_, AppState>) -> CmdResult<Vec<WaitingN
         .collect())
 }
 
-/// The other computer's version of a waiting note: its text, without its properties.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Compared {
+    /// Identifies this computer's version as it was compared.
+    hash: String,
+    properties: Vec<PropertyDifference>,
+    parts: Vec<ComparedPart>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropertyDifference {
+    key: String,
+    /// A string or a list of them, or null where the property isn't set.
+    here: Option<Value>,
+    other: Option<Value>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ComparedPart {
+    Same {
+        text: String,
+    },
+    Different {
+        here: Vec<ComparedPiece>,
+        other: Vec<ComparedPiece>,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComparedPiece {
+    text: String,
+    differs: bool,
+}
+
+fn compared_pieces(pieces: Vec<compare::Piece>) -> Vec<ComparedPiece> {
+    pieces
+        .into_iter()
+        .map(|piece| ComparedPiece {
+            text: piece.text,
+            differs: piece.differs,
+        })
+        .collect()
+}
+
+/// Compares this computer's version of a waiting note with the other computer's.
 #[tauri::command]
-pub async fn other_version(path: String, state: State<'_, AppState>) -> CmdResult<String> {
+pub async fn compare_versions(path: String, state: State<'_, AppState>) -> CmdResult<Compared> {
     let vault = state.vault()?;
     let path = note_path(&vault, &path)?;
-    let text = sync::other_version(&vault, &path).or_message()?;
-    Ok(Note::parse(&path, &text).body)
+    let here = fs::read_to_string(&path).or_message()?;
+    let other = sync::other_version(&vault, &path).or_message()?;
+    let comparison = compare::compare(&here, &other);
+    Ok(Compared {
+        hash: note::content_hash(&here),
+        properties: comparison
+            .properties
+            .into_iter()
+            .map(|difference| PropertyDifference {
+                key: difference.key,
+                here: difference.here.map(property_json),
+                other: difference.other.map(property_json),
+            })
+            .collect(),
+        parts: comparison
+            .parts
+            .into_iter()
+            .map(|part| match part {
+                compare::Part::Same(text) => ComparedPart::Same { text },
+                compare::Part::Different(difference) => ComparedPart::Different {
+                    here: compared_pieces(difference.here),
+                    other: compared_pieces(difference.other),
+                },
+            })
+            .collect(),
+    })
+}
+
+/// Settles a waiting note with a version put together from both: the other computer's value of
+/// each property in `properties`, and at each difference, `here`, `other` or `both`. Nothing is
+/// written if the note changed since it was compared (`base_hash`).
+#[tauri::command]
+pub async fn combine_versions(
+    path: String,
+    base_hash: String,
+    properties: Vec<String>,
+    picks: Vec<String>,
+    state: State<'_, AppState>,
+) -> CmdResult<()> {
+    let vault = state.vault()?;
+    let path = note_path(&vault, &path)?;
+    let here = fs::read_to_string(&path).or_message()?;
+    if note::content_hash(&here) != base_hash {
+        return Err(
+            "This note changed while you were comparing. Compare the two versions again.".into(),
+        );
+    }
+    let picks = picks
+        .iter()
+        .map(|pick| match pick.as_str() {
+            "here" => Ok(compare::Pick::Here),
+            "other" => Ok(compare::Pick::Other),
+            "both" => Ok(compare::Pick::Both),
+            other => Err(format!("unknown choice {other}")),
+        })
+        .collect::<CmdResult<Vec<_>>>()?;
+    let other = sync::other_version(&vault, &path).or_message()?;
+    let combined = compare::combine(&here, &other, &properties, &picks).or_message()?;
+    sync::decide(&vault, &path, sync::Choice::Combined(combined)).or_message()
 }
 
 /// Settles a waiting note, using the other computer's version or keeping this one.
@@ -798,7 +902,12 @@ pub async fn decide_version(
 ) -> CmdResult<()> {
     let vault = state.vault()?;
     let path = note_path(&vault, &path)?;
-    sync::decide(&vault, &path, use_other).or_message()
+    let choice = if use_other {
+        sync::Choice::TheOther
+    } else {
+        sync::Choice::ThisOne
+    };
+    sync::decide(&vault, &path, choice).or_message()
 }
 
 /// Copies a bookshelf from the repository at `address` into a new folder in `place`, and opens it.

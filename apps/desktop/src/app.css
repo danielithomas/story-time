@@ -20,6 +20,9 @@
   --selection: #cce2dd;
   --danger: #a2402f;
   --danger-soft: #f6e1dc;
+  /* Words that differ between two versions of a note: this computer's, and the other's. */
+  --here-soft: #f3e1bd;
+  --other-soft: #d6e5f2;
 
   --outline: #a39b8e;
   --draft: #c4892b;
@@ -45,6 +48,8 @@
   --selection: #2e4945;
   --danger: #e07b66;
   --danger-soft: #3d2520;
+  --here-soft: #4a3a1c;
+  --other-soft: #1f3548;
   color-scheme: dark;
 }
 
@@ -63,6 +68,8 @@
     --selection: #2e4945;
     --danger: #e07b66;
     --danger-soft: #3d2520;
+    --here-soft: #4a3a1c;
+    --other-soft: #1f3548;
     color-scheme: dark;
   }
 }
@@ -193,7 +200,8 @@ textarea {
   width: 100%;
 }
 
-input[type="checkbox"] {
+input[type="checkbox"],
+input[type="radio"] {
   width: auto;
   margin: 0;
   accent-color: var(--accent);

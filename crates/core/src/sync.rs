@@ -300,24 +300,44 @@ pub fn other_version(vault: &Vault, note: &Path) -> Result<String> {
     ]))
 }
 
-/// Settles a waiting note: with `use_other`, its text becomes the other computer's version,
-/// after this computer's is recorded; otherwise this computer's stays. Either way the choice is
-/// recorded, so every computer stops asking.
-pub fn decide(vault: &Vault, note: &Path, use_other: bool) -> Result<()> {
+/// What the writer chose for a note with two versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Choice {
+    /// This computer's version, as it is.
+    ThisOne,
+    /// The other computer's version.
+    TheOther,
+    /// A note made from both, as [`crate::compare::combine`] makes it.
+    Combined(String),
+}
+
+/// Settles a waiting note with the writer's choice: this computer's version stays, or the
+/// note's text becomes the other computer's or the one combined from both, after this
+/// computer's is recorded. Either way the choice is recorded, so every computer stops asking.
+pub fn decide(vault: &Vault, note: &Path, choice: Choice) -> Result<()> {
     let root = &vault.root;
     let found = find_waiting(vault, note)?;
     let path = relative(vault, note)?;
     commit_everything(vault)?;
     let name = crate::note::Note::load(note)?.title();
-    if use_other {
-        let text = run(git(root).args(["show", &format!("{}:{path}", found.other)]))?;
-        fs::write(note, text).with_context(|| format!("writing {}", note.display()))?;
+    let current =
+        fs::read_to_string(note).with_context(|| format!("reading {}", note.display()))?;
+    let other = run(git(root).args(["show", &format!("{}:{path}", found.other)]))?;
+    let text = match choice {
+        Choice::ThisOne => current.clone(),
+        Choice::TheOther => other.clone(),
+        Choice::Combined(text) => text,
+    };
+    if text != current {
+        crate::note::write_atomically(note, &text)?;
         run(git(root).args(["add", "--", &path]))?;
     }
-    let subject = if use_other {
+    let subject = if text == current {
+        format!("{name}: kept this computer's version")
+    } else if text == other {
         format!("{name}: used the other computer's version")
     } else {
-        format!("{name}: kept this computer's version")
+        format!("{name}: took parts of both computers' versions")
     };
     run(git(root).args(identity(vault)).args([
         "commit",
@@ -696,7 +716,7 @@ mod tests {
             "every computer with the merge asks"
         );
 
-        decide(&t.a, &t.arrival_a, true).unwrap();
+        decide(&t.a, &t.arrival_a, Choice::TheOther).unwrap();
         assert!(read(&t.arrival_a).contains("at dawn") && !read(&t.arrival_a).contains("at night"));
         assert!(waiting(&t.a).unwrap().is_empty());
         sync(&t.a).unwrap();
@@ -718,13 +738,52 @@ mod tests {
         sync(&t.a).unwrap();
         write(&t.arrival_b, "# Arrival\n\nNight.\n");
         sync(&t.b).unwrap();
-        decide(&t.b, &t.arrival_b, false).unwrap();
+        decide(&t.b, &t.arrival_b, Choice::ThisOne).unwrap();
         assert!(read(&t.arrival_b).contains("Night."));
         assert!(waiting(&t.b).unwrap().is_empty());
         assert!(
-            decide(&t.b, &t.arrival_b, false).is_err(),
+            decide(&t.b, &t.arrival_b, Choice::ThisOne).is_err(),
             "nothing left to choose"
         );
+    }
+
+    #[test]
+    fn saves_a_note_made_from_both_versions() {
+        if !has_git() {
+            return;
+        }
+        let t = two();
+        write(
+            &t.arrival_a,
+            "# Arrival\n\nShe came ashore at dawn. The gulls cried.\n",
+        );
+        sync(&t.a).unwrap();
+        write(
+            &t.arrival_b,
+            "# Arrival\n\nShe came ashore. The gulls were silent.\n",
+        );
+        sync(&t.b).unwrap();
+        let here = read(&t.arrival_b);
+        let other = other_version(&t.b, &t.arrival_b).unwrap();
+        let comparison = crate::compare::compare(&here, &other);
+        assert_eq!(
+            comparison.differences().count(),
+            1,
+            "one paragraph, a sentence apart"
+        );
+        let combined =
+            crate::compare::combine(&here, &other, &[], &[crate::compare::Pick::Both]).unwrap();
+        decide(&t.b, &t.arrival_b, Choice::Combined(combined.clone())).unwrap();
+        assert_eq!(read(&t.arrival_b), combined);
+        assert!(waiting(&t.b).unwrap().is_empty());
+        assert_eq!(
+            ask(&t.b.root, &["log", "-1", "--format=%s"]).trim(),
+            "Arrival: took parts of both computers' versions"
+        );
+        sync(&t.b).unwrap();
+        sync(&t.a).unwrap();
+        assert_eq!(read(&t.arrival_a), combined, "the other computer takes it");
+        assert!(waiting(&t.a).unwrap().is_empty());
     }
 
     #[test]

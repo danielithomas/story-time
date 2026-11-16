@@ -11,6 +11,7 @@
 
 pub mod backup;
 pub mod check;
+pub mod compare;
 pub mod compile;
 pub mod config;
 pub mod contents;
