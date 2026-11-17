@@ -69,6 +69,10 @@ The 3-2-1 rule: three copies, on two kinds of media, one off-site. The desktop a
 - The obsidian-git plugin commits and syncs on a timer (`autoSaveInterval`, in minutes), and only while Obsidian is open. Work done between syncs, or with Obsidian closed, exists only locally until the next sync. A shorter interval narrows that window.
 - **OneDrive** works fine for a plain folder, and story-time doesn't care where the bookshelf lives. Don't put a *git repository* inside a synced folder, though: two sync engines working on `.git/` can corrupt it. Choose git with GitHub, or OneDrive, for a given folder. On Linux there is no official OneDrive client; the usual choices are the open-source `onedrive` client (abraunegg) or `rclone`.
 
+## 8. Help from agents
+
+Story Time is for a human to write in. Writers use AI tools for many things, and the line drawn here is around the writing rather than in it. An agent may take down notes the writer dictates on a walk, gather research with its sources, and find and read what's already on the bookshelf: which scenes mention the lighthouse, what the outline says, how far along the draft is. It isn't given a way to create, change, reorder or delete scenes, chapters, the world bible or story flows. Whatever an agent adds arrives as a new note for the writer to use or not: a captured note stays in the scratchpad exactly as it arrived, and research opens with a reminder to check it against its source, because an agent's summary can be wrong. A skill tells an agent where the line is; an MCP server that offers nothing else holds it.
+
 ## What could come next
 
 Ordered roughly by value for effort:

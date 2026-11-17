@@ -17,6 +17,7 @@ use story_time_core::ideas;
 use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch, Step};
 use story_time_core::scratchpad::{self, Scratchpad};
+use story_time_core::search;
 use story_time_core::sync;
 use story_time_core::upgrade;
 use story_time_core::vault::Measured;
@@ -24,6 +25,7 @@ use story_time_core::{Book, Form, NoteKind, Scene, Vault};
 
 use crate::json;
 use crate::output::{Align, Table, bar, percent, plural, signed, thousands, wrap};
+use crate::reports;
 
 pub fn init(root: &Path, force: bool, example: bool, now: NaiveDateTime) -> Result<()> {
     let root = root
@@ -218,10 +220,10 @@ pub fn add(
 }
 
 pub fn stats_all(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
-    let (measured, history) = vault.snapshot(now)?;
     if json {
-        return json::print(&json::stats(vault, &measured, &history, now.date()));
+        return json::print(&reports::stats(vault, &vault.root, None, now)?);
     }
+    let (measured, history) = vault.snapshot(now)?;
     if measured.is_empty() {
         println!("No books yet. Start one with: story-time new \"Title\"");
         return Ok(());
@@ -287,31 +289,15 @@ pub fn stats_project(
     now: NaiveDateTime,
     json: bool,
 ) -> Result<()> {
+    if json {
+        return json::print(&reports::stats(vault, cwd, Some(query), now)?);
+    }
     let project = vault.find_project(Some(query), cwd)?;
     let (measured, history) = vault.snapshot(now)?;
     let books: Vec<Measured> = measured
         .into_iter()
         .filter(|m| m.project.slug == project.slug)
         .collect();
-    if json {
-        let sizes = json::ProjectSizes {
-            characters: project.notes(NoteKind::Character)?.len(),
-            locations: project.notes(NoteKind::Location)?.len(),
-            world: project.notes(NoteKind::World)?.len(),
-            research: scratchpad::research(&project.research_dir())?.len(),
-        };
-        let scratchpad = Scratchpad::of_project(&project)?;
-        let report = json::project_stats(
-            vault,
-            &project,
-            &books,
-            &history,
-            now.date(),
-            sizes,
-            &scratchpad,
-        );
-        return json::print(&report);
-    }
     if books.is_empty() {
         println!(
             "\n  {} has no books yet. Add one with: story-time new \"Title\" --in {}",
@@ -495,12 +481,12 @@ pub fn outline(
     book: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    if json {
+        return json::print(&reports::outline(vault, cwd, project, book)?);
+    }
     let project = vault.find_project(project, cwd)?;
     let book = project.find_book(book, cwd)?;
     let contents = book.contents()?;
-    if json {
-        return json::print(&json::outline(vault, &project, &book, &contents));
-    }
     println!("\n  {}: outline\n", book.title());
     if contents.scenes().next().is_none() && contents.chapters().next().is_none() {
         println!("  No scenes yet.");
@@ -552,12 +538,11 @@ fn print_scene(scene: &Scene) {
 }
 
 pub fn today(vault: &Vault, now: NaiveDateTime, json: bool) -> Result<()> {
+    if json {
+        return json::print(&reports::today(vault, now)?);
+    }
     let (measured, history) = vault.snapshot(now)?;
     let day = now.date();
-    if json {
-        let scratchpads = vault.scratchpads()?;
-        return json::print(&json::today(vault, &measured, &scratchpads, &history, day));
-    }
     let written = history.written_on(day, None);
     let goal = vault.config.daily_goal;
     let progress = written.max(0) as u64;
@@ -810,10 +795,10 @@ pub fn research_add(
 }
 
 pub fn ideas(vault: &Vault, json: bool) -> Result<()> {
-    let entries = ideas::list_ideas(&ideas::read(vault)?);
     if json {
-        return json::print(&json::ideas(entries));
+        return json::print(&reports::ideas(vault)?);
     }
+    let entries = ideas::list_ideas(&ideas::read(vault)?);
     if entries.is_empty() {
         println!("No ideas yet. Capture one with: story-time idea \"Name: description\"");
         return Ok(());
@@ -852,11 +837,11 @@ pub fn idea(vault: &Vault, text: &str, non_fiction: bool) -> Result<()> {
 }
 
 pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>, json: bool) -> Result<()> {
+    if json {
+        return json::print(&reports::check(vault, cwd, project)?);
+    }
     let project = vault.find_project(project, cwd)?;
     let report = check::check(vault, &project)?;
-    if json {
-        return json::print(&json::check(vault, &project, report));
-    }
     println!("\n  World bible check: {}\n", project.title());
     if report.is_clean() {
         println!("  Nothing to report.");
@@ -975,6 +960,82 @@ pub fn check(vault: &Vault, cwd: &Path, project: Option<&str>, json: bool) -> Re
         for (path, error) in &report.unreadable_frontmatter {
             println!("    {}: {error}", vault.relative(path).display());
         }
+    }
+    Ok(())
+}
+
+pub fn notes(vault: &Vault, cwd: &Path, project: Option<&str>, json: bool) -> Result<()> {
+    if json {
+        return json::print(&reports::notes(vault, cwd, project)?);
+    }
+    let project = project
+        .map(|query| vault.find_project(Some(query), cwd))
+        .transpose()?;
+    let listed = search::notes(vault, project.as_ref())?;
+    if listed.is_empty() {
+        println!("No notes yet.");
+        return Ok(());
+    }
+    let mut table = Table::new(&[
+        ("Kind", Align::Left),
+        ("Name", Align::Left),
+        ("Path", Align::Left),
+    ]);
+    for note in &listed {
+        table.row(vec![
+            note.placed.kind.to_string(),
+            note.name.clone(),
+            vault.relative(&note.path).display().to_string(),
+        ]);
+    }
+    println!();
+    table.print(2);
+    println!("\n  {}", plural(listed.len() as u64, "note", "notes"));
+    Ok(())
+}
+
+pub fn search(
+    vault: &Vault,
+    cwd: &Path,
+    query: &str,
+    project: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return json::print(&reports::search(vault, cwd, query, project)?);
+    }
+    let project = project
+        .map(|query| vault.find_project(Some(query), cwd))
+        .transpose()?;
+    let found = search::search(vault, query, project.as_ref())?;
+    if found.is_empty() {
+        println!("No note has all of: {query}");
+        return Ok(());
+    }
+    for hit in &found {
+        println!(
+            "\n  {}  ({} · {})",
+            hit.note.name,
+            hit.note.placed.kind,
+            vault.relative(&hit.note.path).display()
+        );
+        for excerpt in &hit.excerpts {
+            println!("    {excerpt}");
+        }
+    }
+    println!("\n  {}", plural(found.len() as u64, "note", "notes"));
+    Ok(())
+}
+
+pub fn show(vault: &Vault, cwd: &Path, note: &str, json: bool) -> Result<()> {
+    if json {
+        return json::print(&reports::show(vault, cwd, note)?);
+    }
+    let path = search::find(vault, cwd, note)?;
+    let (_, content) = search::read(vault, &path)?;
+    print!("{content}");
+    if !content.ends_with('\n') {
+        println!();
     }
     Ok(())
 }

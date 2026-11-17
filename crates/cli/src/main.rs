@@ -2,7 +2,9 @@
 
 mod commands;
 mod json;
+mod mcp;
 mod output;
+mod reports;
 
 use std::env;
 use std::path::PathBuf;
@@ -170,6 +172,33 @@ enum Command {
         #[command(flatten)]
         output: Output,
     },
+    /// List the notes on the bookshelf, or in one project, with what each is.
+    Notes {
+        /// Only this project's notes (slug or title).
+        #[arg(short, long)]
+        project: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Find the notes that have every word searched for, in any case, in their text or
+    /// properties. A "quoted phrase" counts as one. Notes named by a word come first.
+    Search {
+        /// The words to look for.
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+        /// Only this project's notes (slug or title).
+        #[arg(short, long)]
+        project: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Print a note as written.
+    Show {
+        /// The note: its name, its file name, or the path to it.
+        note: String,
+        #[command(flatten)]
+        output: Output,
+    },
     /// Rename a scene, character, location, world note or research note: its name, its file name
     /// and every link to it change together.
     Rename {
@@ -201,6 +230,10 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Serve an agent through the Model Context Protocol, on standard input and output. It can
+    /// capture notes, add research, and list, search and read the bookshelf, but nothing it
+    /// offers writes or changes the story.
+    Mcp,
 }
 
 /// How a report is printed.
@@ -300,13 +333,18 @@ fn run(cli: Cli) -> Result<()> {
         return commands::init(&bookshelf.unwrap_or(cwd), force, example, now);
     }
     let vault = Vault::discover(bookshelf.as_deref(), &cwd)?;
+    if let Command::Mcp = cli.command {
+        return mcp::serve(&vault.root);
+    }
     if let Command::Upgrade { dry_run } = cli.command {
         return commands::upgrade(&vault, dry_run, now);
     }
     vault.config.ensure_current()?;
     // Values below were validated by clap's possible-values parsers.
     match cli.command {
-        Command::Init { .. } | Command::Upgrade { .. } => unreachable!("handled above"),
+        Command::Init { .. } | Command::Upgrade { .. } | Command::Mcp => {
+            unreachable!("handled above")
+        }
         Command::New {
             title,
             world,
@@ -423,6 +461,21 @@ fn run(cli: Cli) -> Result<()> {
         Command::Check { project, output } => {
             commands::check(&vault, &cwd, project.as_deref(), output.json)
         }
+        Command::Notes { project, output } => {
+            commands::notes(&vault, &cwd, project.as_deref(), output.json)
+        }
+        Command::Search {
+            query,
+            project,
+            output,
+        } => commands::search(
+            &vault,
+            &cwd,
+            &query.join(" "),
+            project.as_deref(),
+            output.json,
+        ),
+        Command::Show { note, output } => commands::show(&vault, &cwd, &note, output.json),
         Command::Rename { note, name } => commands::rename(&vault, &cwd, &note, name.as_deref()),
         Command::Compile {
             project,

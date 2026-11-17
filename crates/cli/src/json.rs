@@ -1,4 +1,5 @@
-//! `--json`: what `stats`, `outline`, `today`, `history`, `check` and `ideas` report, as JSON for
+//! `--json`: what `stats`, `outline`, `today`, `history`, `check`, `ideas`, `notes`, `search` and
+//! `show` report, as JSON for
 //! scripts and other programs (Obsidian's Shell Commands plugin, n8n, a dashboard). Keys are
 //! snake_case and stay stable; a value that isn't set is `null`. Paths are relative to the
 //! bookshelf, and links in properties (a scene's point of view, say) are given as the names they
@@ -11,7 +12,9 @@ use story_time_core::check::Report;
 use story_time_core::contents::Contents;
 use story_time_core::history::History;
 use story_time_core::ideas::IdeaEntry;
+use story_time_core::note::{Note, PropertyValue};
 use story_time_core::scratchpad::Scratchpad;
+use story_time_core::search::{Found, Listed};
 use story_time_core::vault::Measured;
 use story_time_core::words::plain_text;
 use story_time_core::{Book, Form, Project, Scene, Vault};
@@ -540,6 +543,111 @@ pub fn ideas(entries: Vec<IdeaEntry>) -> Ideas {
                 project: entry.project,
             })
             .collect(),
+    }
+}
+
+/// A note: where it is, what it's called and what it is.
+#[derive(Serialize)]
+pub struct NoteRef {
+    path: String,
+    name: String,
+    /// The other names it lists in `aliases`.
+    aliases: Vec<String>,
+    /// `project`, `book`, `flow`, `scene`, `character`, `location`, `world`, `timeline`,
+    /// `research`, `scrap`, or `note` for the ideas file and anything else.
+    kind: &'static str,
+    /// The project and book it belongs to, by file name.
+    project: Option<String>,
+    book: Option<String>,
+}
+
+fn note_ref(vault: &Vault, listed: &Listed) -> NoteRef {
+    NoteRef {
+        path: relative(vault, &listed.path),
+        name: listed.name.clone(),
+        aliases: listed.aliases.clone(),
+        kind: listed.placed.kind,
+        project: listed.placed.project.clone(),
+        book: listed.placed.book.clone(),
+    }
+}
+
+/// `notes`: every note on the bookshelf, or in one project.
+#[derive(Serialize)]
+pub struct Notes {
+    notes: Vec<NoteRef>,
+}
+
+pub fn notes(vault: &Vault, listed: &[Listed]) -> Notes {
+    Notes {
+        notes: listed.iter().map(|note| note_ref(vault, note)).collect(),
+    }
+}
+
+/// `search`: the notes with every word searched for, best first.
+#[derive(Serialize)]
+pub struct Search {
+    query: String,
+    results: Vec<SearchResult>,
+}
+
+#[derive(Serialize)]
+pub struct SearchResult {
+    #[serde(flatten)]
+    note: NoteRef,
+    /// How many times the words appear in it.
+    matches: usize,
+    /// The first few lines they appear in.
+    excerpts: Vec<String>,
+}
+
+pub fn search(vault: &Vault, query: &str, found: &[Found]) -> Search {
+    Search {
+        query: query.to_string(),
+        results: found
+            .iter()
+            .map(|found| SearchResult {
+                note: note_ref(vault, &found.note),
+                matches: found.matches,
+                excerpts: found.excerpts.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// `show`: one note in full.
+#[derive(Serialize)]
+pub struct Shown {
+    #[serde(flatten)]
+    note: NoteRef,
+    words: usize,
+    /// Its properties, each a string or a list of strings.
+    properties: serde_json::Map<String, serde_json::Value>,
+    /// Its text after the properties, as written.
+    body: String,
+}
+
+pub fn shown(vault: &Vault, listed: &Listed, content: &str) -> Shown {
+    let note = Note::parse(&listed.path, content);
+    let properties = note
+        .frontmatter
+        .entries()
+        .into_iter()
+        .map(|(key, value)| {
+            let value = match value {
+                PropertyValue::Text(text) => serde_json::Value::String(text),
+                PropertyValue::List(items) => {
+                    serde_json::Value::Array(items.into_iter().map(Into::into).collect())
+                }
+            };
+            (key, value)
+        })
+        .collect();
+    Shown {
+        note: note_ref(vault, listed),
+        words: note.words(),
+        properties,
+        body: note.body,
     }
 }
 

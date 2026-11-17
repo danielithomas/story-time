@@ -20,12 +20,11 @@ use story_time_core::history::History;
 use story_time_core::ideas;
 use story_time_core::links::LinkIndex;
 use story_time_core::note::{self, Note, PropertyValue, Saved};
-use story_time_core::project::{
-    BIBLE_DIR, BOOK_STATUSES, BOOKS_DIR, RESEARCH_DIR, SCENE_STATUSES, SCRATCHPAD_DIR,
-};
+use story_time_core::project::{BOOK_STATUSES, SCENE_STATUSES};
 use story_time_core::rename;
 use story_time_core::scaffold::{self, NewBook, NewProject, NewResearch};
 use story_time_core::scratchpad::{self, Scratchpad};
+use story_time_core::search;
 use story_time_core::structures::{self, STRUCTURES};
 use story_time_core::sync;
 use story_time_core::text::thousands;
@@ -422,48 +421,8 @@ fn note_path(vault: &Vault, path: &str) -> CmdResult<PathBuf> {
 
 /// What a note is, from where it sits in the vault, and the project and book it belongs to.
 fn classify(vault: &Vault, path: &Path) -> (String, Option<String>, Option<String>) {
-    if path == vault.ideas_path() {
-        return ("note".to_string(), None, None);
-    }
-    if path.starts_with(vault.scratchpad_dir()) {
-        return ("scrap".to_string(), None, None);
-    }
-    if path.starts_with(vault.research_dir()) {
-        return ("research".to_string(), None, None);
-    }
-    let parts: Vec<String> = vault
-        .relative(path)
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    let kind = match parts.as_slice() {
-        [slug, file] if *file == format!("{slug}.md") => "project",
-        [slug, bible, file] if bible == BIBLE_DIR && *file == format!("{slug}-timeline.md") => {
-            "timeline"
-        }
-        [_, folder, _, ..] if folder == SCRATCHPAD_DIR => "scrap",
-        [_, folder, _, ..] if folder == RESEARCH_DIR => "research",
-        [_, books, book, file] if books == BOOKS_DIR && *file == format!("{book}.md") => "book",
-        [_, books, book, file] if books == BOOKS_DIR && *file == format!("{book}-flow.md") => {
-            "flow"
-        }
-        [_, books, _, folder, _, ..]
-            if books == BOOKS_DIR && folder == NoteKind::Scene.folder() =>
-        {
-            "scene"
-        }
-        [_, bible, folder, _, ..] if bible == BIBLE_DIR => NoteKind::ALL
-            .into_iter()
-            .find(|kind| kind.is_bible() && kind.folder() == folder.as_str())
-            .map_or("note", NoteKind::key),
-        _ => "note",
-    };
-    let project = (parts.len() > 1).then(|| parts[0].clone());
-    let book = match parts.as_slice() {
-        [_, books, book, _, ..] if books == BOOKS_DIR => Some(book.clone()),
-        _ => None,
-    };
-    (kind.to_string(), project, book)
+    let placed = search::place(vault, path);
+    (placed.kind.to_string(), placed.project, placed.book)
 }
 
 fn properties_json(note: &Note) -> Map<String, Value> {

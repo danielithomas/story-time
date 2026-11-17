@@ -739,3 +739,115 @@ fn keeps_a_history() {
         "Nothing new to record.\n"
     );
 }
+
+#[test]
+fn lists_searches_and_shows_notes() {
+    let dir = vault();
+    let root = dir.path();
+    ok(root, &["init", "--example"]);
+
+    let notes = ok(root, &["notes"]);
+    assert!(notes.contains("scene"), "{notes}");
+    assert!(notes.contains("Scenes and Chapters"), "{notes}");
+    assert!(
+        !notes.contains("templates/"),
+        "templates aren't notes: {notes}"
+    );
+    let listed: serde_json::Value = serde_json::from_str(&ok(root, &["notes", "--json"])).unwrap();
+    let scene = listed["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|note| note["name"] == "Scenes and Chapters")
+        .unwrap();
+    assert_eq!(scene["kind"], "scene");
+    assert!(scene["book"].is_string());
+
+    let found = ok(root, &["search", "chapters", "contents"]);
+    assert!(found.contains("Scenes and Chapters  (scene · "), "{found}");
+    let found: serde_json::Value = serde_json::from_str(&ok(
+        root,
+        &["search", "\"no files of their own\"", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(found["results"].as_array().unwrap().len(), 1);
+    assert!(ok(root, &["search", "zebra"]).contains("No note has all of: zebra"));
+
+    let shown = ok(root, &["show", "Scenes and Chapters"]);
+    let path = scene["path"].as_str().unwrap();
+    assert_eq!(shown, fs::read_to_string(root.join(path)).unwrap());
+    let shown: serde_json::Value =
+        serde_json::from_str(&ok(root, &["show", path, "--json"])).unwrap();
+    assert_eq!(shown["properties"]["status"], "revised");
+    assert!(
+        shown["body"]
+            .as_str()
+            .unwrap()
+            .starts_with("# Scenes and Chapters")
+    );
+    let outside = run(root, &["show", "../outside.md"]);
+    assert!(!outside.status.success());
+}
+
+#[test]
+fn serves_agents_over_mcp() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let dir = vault();
+    let root = dir.path();
+    ok(root, &["init", "--example"]);
+    let before = ok(root, &["notes", "--json"]);
+
+    let mut server = Command::new(env!("CARGO_BIN_EXE_story-time"))
+        .args(["mcp", "--bookshelf"])
+        .arg(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let requests = [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search","arguments":{"query":"chapters"}}}"#,
+        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capture_note","arguments":{"text":"Said aloud.","source":"dictation"}}}"#,
+    ];
+    let mut stdin = server.stdin.take().unwrap();
+    for request in requests {
+        writeln!(stdin, "{request}").unwrap();
+    }
+    drop(stdin);
+    let output = server.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let replies: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        replies.len(),
+        4,
+        "the notification gets no reply: {replies:?}"
+    );
+    assert_eq!(replies[0]["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 10);
+    let found: serde_json::Value =
+        serde_json::from_str(replies[2]["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(found["results"][0]["name"], "Scenes and Chapters");
+    let kept = replies[3]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(kept.starts_with("Kept the note as scratchpad/"), "{kept}");
+
+    let after: serde_json::Value = serde_json::from_str(&ok(root, &["notes", "--json"])).unwrap();
+    let before: serde_json::Value = serde_json::from_str(&before).unwrap();
+    assert_eq!(
+        after["notes"].as_array().unwrap().len(),
+        before["notes"].as_array().unwrap().len() + 1,
+        "only the captured note is new"
+    );
+}
